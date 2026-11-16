@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 require('dotenv').config();
+const { seedInitialData } = require('../seeders/seedData');
 
 let mongodInstance = null;
 
@@ -11,9 +12,10 @@ const connectDB = async () => {
   // Try standard MONGODB_URI first
   try {
     const conn = await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 5000,
     });
     console.log(`[Database] MongoDB Connected to host: ${conn.connection.host}`);
+    await seedInitialData();
     return conn;
   } catch (err) {
     console.warn(`[Database] Standard MongoDB connection failed (${err.message}).`);
@@ -31,6 +33,7 @@ const connectDB = async () => {
         const memoryUri = mongodInstance.getUri();
         const conn = await mongoose.connect(memoryUri);
         console.log(`[Database] In-Memory MongoDB Connected at: ${memoryUri}`);
+        await seedInitialData();
         return conn;
       } catch (fallbackErr) {
         console.warn('[Database] In-Memory MongoDB not ready yet:', fallbackErr.message);
