@@ -4,6 +4,7 @@ const Task = require('../models/Task');
 const ActivityLog = require('../models/ActivityLog');
 const Notification = require('../models/Notification');
 const Comment = require('../models/Comment');
+const FieldCheckIn = require('../models/FieldCheckIn');
 
 const seedInitialData = async () => {
   try {
@@ -193,6 +194,36 @@ const seedInitialData = async () => {
       },
     ]);
 
+    // 7. Seed Demonstration Field Check-in
+    await FieldCheckIn.create([
+      {
+        employee: rahul._id,
+        latitude: 25.351463,
+        longitude: 74.632922,
+        accuracy: 12,
+        address: 'Inder Pratash Tower, Bhopal Ganj, Bhilwara, Rajasthan 311001, India',
+        city: 'Bhilwara',
+        state: 'Rajasthan',
+        country: 'India',
+        purpose: 'CLIENT_VISIT',
+        notes: 'Initial client requirement discussion at Inder Pratash Tower',
+        timestamp: new Date(),
+      },
+      {
+        employee: priya._id,
+        latitude: 25.340021,
+        longitude: 74.640118,
+        accuracy: 15,
+        address: 'Subhash Nagar, Bhilwara, Rajasthan 311001, India',
+        city: 'Bhilwara',
+        state: 'Rajasthan',
+        country: 'India',
+        purpose: 'SITE_INSPECTION',
+        notes: 'On-site UI validation and client walkthrough',
+        timestamp: new Date(Date.now() - 3600000 * 2),
+      },
+    ]);
+
     console.log('[Auto-Seed] ✅ Default demonstration records seeded successfully!');
     return true;
   } catch (err) {
@@ -202,3 +233,4 @@ const seedInitialData = async () => {
 };
 
 module.exports = { seedInitialData };
+

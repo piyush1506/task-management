@@ -14,10 +14,12 @@ import ProjectManagementPage from './pages/admin/ProjectManagementPage';
 import TaskManagementPage from './pages/admin/TaskManagementPage';
 import EmployeeManagementPage from './pages/admin/EmployeeManagementPage';
 import ReportsPage from './pages/admin/ReportsPage';
+import AdminFieldTrackingPage from './pages/admin/AdminFieldTrackingPage';
 
 import EmployeeDashboardPage from './pages/employee/EmployeeDashboardPage';
 import EmployeeTasksPage from './pages/employee/EmployeeTasksPage';
 import EmployeeProjectsPage from './pages/employee/EmployeeProjectsPage';
+import EmployeeFieldCheckInPage from './pages/employee/EmployeeFieldCheckInPage';
 
 function RootRedirect() {
   const { user, isAuthenticated, loading } = useAuth();
@@ -63,6 +65,7 @@ export default function App() {
             <Route path="projects" element={<ProjectManagementPage />} />
             <Route path="tasks" element={<TaskManagementPage />} />
             <Route path="employees" element={<EmployeeManagementPage />} />
+            <Route path="field-tracking" element={<AdminFieldTrackingPage />} />
             <Route path="reports" element={<ReportsPage />} />
           </Route>
 
@@ -79,6 +82,7 @@ export default function App() {
             <Route path="dashboard" element={<EmployeeDashboardPage />} />
             <Route path="tasks" element={<EmployeeTasksPage />} />
             <Route path="projects" element={<EmployeeProjectsPage />} />
+            <Route path="field-checkin" element={<EmployeeFieldCheckInPage />} />
           </Route>
 
           {/* Root & Catch-all */}

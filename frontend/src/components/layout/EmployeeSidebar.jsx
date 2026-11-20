@@ -6,6 +6,8 @@ import {
   LayoutDashboard,
   CheckSquare,
   FolderKanban,
+  Camera,
+  Compass,
   User,
   LogOut,
   X,
@@ -18,6 +20,7 @@ export default function EmployeeSidebar({ isOpen, onClose }) {
     { name: 'My Dashboard', to: '/employee/dashboard', icon: LayoutDashboard },
     { name: 'My Tasks', to: '/employee/tasks', icon: CheckSquare },
     { name: 'My Projects', to: '/employee/projects', icon: FolderKanban },
+    { name: 'GPS Field Check-in', to: '/employee/field-checkin', icon: Camera },
   ];
 
   return (

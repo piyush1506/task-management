@@ -7,6 +7,7 @@ import {
   FolderKanban,
   CheckSquare,
   Users,
+  Compass,
   BarChart3,
   LogOut,
   X,
@@ -20,6 +21,7 @@ export default function AdminSidebar({ isOpen, onClose }) {
     { name: 'Projects', to: '/admin/projects', icon: FolderKanban },
     { name: 'Tasks', to: '/admin/tasks', icon: CheckSquare },
     { name: 'Employees', to: '/admin/employees', icon: Users },
+    { name: 'Field Tracking', to: '/admin/field-tracking', icon: Compass },
     { name: 'Reports', to: '/admin/reports', icon: BarChart3 },
   ];
 
