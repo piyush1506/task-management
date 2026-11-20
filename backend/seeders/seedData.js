@@ -102,10 +102,34 @@ const seedInitialData = async () => {
       project: project1._id,
       assignedTo: rahul._id,
       priority: 'HIGH',
-      status: 'PENDING',
+      status: 'IN_PROGRESS',
       startDate: now,
       deadline: sevenDaysLater,
       createdBy: admin._id,
+      subtasks: [
+        {
+          title: 'Create wireframe draft for hero section',
+          isCompleted: true,
+          completedAt: now,
+          createdBy: rahul._id,
+        },
+        {
+          title: 'Select responsive font families and layout grid',
+          isCompleted: true,
+          completedAt: now,
+          createdBy: rahul._id,
+        },
+        {
+          title: 'Implement announcements carousel widget',
+          isCompleted: false,
+          createdBy: rahul._id,
+        },
+        {
+          title: 'Review mobile viewport breakpoints on real devices',
+          isCompleted: false,
+          createdBy: rahul._id,
+        },
+      ],
     });
 
     const task2 = await Task.create({
@@ -118,6 +142,25 @@ const seedInitialData = async () => {
       startDate: now,
       deadline: fourteenDaysLater,
       createdBy: admin._id,
+      subtasks: [
+        {
+          title: 'Setup input fields and validation schemas',
+          isCompleted: true,
+          completedAt: now,
+          createdBy: rahul._id,
+        },
+        {
+          title: 'Connect API to backend JWT authentication endpoint',
+          isCompleted: true,
+          completedAt: now,
+          createdBy: rahul._id,
+        },
+        {
+          title: 'Add show/hide password toggle button',
+          isCompleted: false,
+          createdBy: rahul._id,
+        },
+      ],
     });
 
     const task3 = await Task.create({

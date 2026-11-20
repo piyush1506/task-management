@@ -446,6 +446,198 @@ const addTaskComment = async (req, res, next) => {
   }
 };
 
+// @desc    Add a subtask to a task (Employee assigned or Admin)
+// @route   POST /api/tasks/:id/subtasks
+// @access  Private
+const addSubtask = async (req, res, next) => {
+  try {
+    const { title } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Subtask title cannot be empty',
+      });
+    }
+
+    const task = await Task.findById(req.params.id);
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found',
+      });
+    }
+
+    // Permission check: Assigned employee or Admin
+    const isAssignee = task.assignedTo?.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (!isAssignee && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Only the assigned employee or an admin can add subtasks',
+      });
+    }
+
+    const newSubtask = {
+      title: title.trim(),
+      isCompleted: false,
+      createdBy: req.user._id,
+      createdAt: new Date(),
+    };
+
+    task.subtasks.push(newSubtask);
+
+    // If task is pending, advance to in progress
+    if (task.status === 'PENDING') {
+      task.status = 'IN_PROGRESS';
+    }
+
+    await task.save();
+
+    await ActivityLog.create({
+      user: req.user._id,
+      action: 'SUBTASK_ADDED',
+      entityType: 'TASK',
+      entityId: task._id,
+      description: `${req.user.name} added subtask "${title.trim()}" to "${task.title}"`,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Subtask added successfully',
+      subtasks: task.subtasks,
+      task,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Toggle or update a subtask's completion status (Employee or Admin)
+// @route   PATCH /api/tasks/:id/subtasks/:subtaskId
+// @access  Private
+const toggleSubtask = async (req, res, next) => {
+  try {
+    const { id, subtaskId } = req.params;
+    const { isCompleted } = req.body;
+
+    const task = await Task.findById(id);
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found',
+      });
+    }
+
+    // Permission check: Assigned employee or Admin
+    const isAssignee = task.assignedTo?.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (!isAssignee && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Only the assigned employee or an admin can update subtasks',
+      });
+    }
+
+    const subtask = task.subtasks.id(subtaskId);
+    if (!subtask) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subtask not found',
+      });
+    }
+
+    const nextState = typeof isCompleted === 'boolean' ? isCompleted : !subtask.isCompleted;
+    subtask.isCompleted = nextState;
+    subtask.completedAt = nextState ? new Date() : null;
+    subtask.completedBy = nextState ? req.user._id : null;
+
+    const totalCount = task.subtasks.length;
+    const completedCount = task.subtasks.filter((s) => s.isCompleted).length;
+    const allCompleted = totalCount > 0 && completedCount === totalCount;
+
+    // If all subtasks are complete, prompt or auto-update task status
+    if (allCompleted && task.status !== 'COMPLETED') {
+      task.status = 'COMPLETED';
+      task.completedAt = new Date();
+    } else if (!allCompleted && task.status === 'COMPLETED' && totalCount > 0) {
+      // If a subtask was unchecked from a completed task, move back to in-progress
+      task.status = 'IN_PROGRESS';
+      task.completedAt = null;
+    }
+
+    await task.save();
+
+    await ActivityLog.create({
+      user: req.user._id,
+      action: 'SUBTASK_UPDATED',
+      entityType: 'TASK',
+      entityId: task._id,
+      description: `${req.user.name} marked subtask "${subtask.title}" as ${
+        nextState ? 'COMPLETED' : 'INCOMPLETE'
+      }`,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Subtask marked as ${nextState ? 'completed' : 'incomplete'}`,
+      subtask,
+      subtasks: task.subtasks,
+      summary: {
+        totalCount,
+        completedCount,
+        progressPercentage: Math.round((completedCount / totalCount) * 100),
+        allCompleted,
+      },
+      task,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Delete a subtask
+// @route   DELETE /api/tasks/:id/subtasks/:subtaskId
+// @access  Private
+const deleteSubtask = async (req, res, next) => {
+  try {
+    const { id, subtaskId } = req.params;
+
+    const task = await Task.findById(id);
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found',
+      });
+    }
+
+    // Permission check
+    const isAssignee = task.assignedTo?.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (!isAssignee && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Only the assigned employee or an admin can delete subtasks',
+      });
+    }
+
+    task.subtasks.pull({ _id: subtaskId });
+    await task.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Subtask deleted successfully',
+      subtasks: task.subtasks,
+      task,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getTasks,
   createTask,
@@ -454,5 +646,8 @@ module.exports = {
   updateTaskStatus,
   deleteTask,
   addTaskComment,
+  addSubtask,
+  toggleSubtask,
+  deleteSubtask,
 };
 

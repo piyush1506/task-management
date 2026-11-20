@@ -8,6 +8,9 @@ const {
   updateTaskStatus,
   deleteTask,
   addTaskComment,
+  addSubtask,
+  toggleSubtask,
+  deleteSubtask,
 } = require('../controllers/taskController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -22,6 +25,11 @@ router.route('/:id')
 
 router.patch('/:id/status', protect, updateTaskStatus);
 router.post('/:id/comments', protect, addTaskComment);
+
+// Subtask management routes
+router.post('/:id/subtasks', protect, addSubtask);
+router.patch('/:id/subtasks/:subtaskId', protect, toggleSubtask);
+router.delete('/:id/subtasks/:subtaskId', protect, deleteSubtask);
 
 module.exports = router;
 

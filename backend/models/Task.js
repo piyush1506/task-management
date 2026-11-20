@@ -1,5 +1,36 @@
 const mongoose = require('mongoose');
 
+const subtaskSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: [true, 'Subtask title is required'],
+      trim: true,
+    },
+    isCompleted: {
+      type: Boolean,
+      default: false,
+    },
+    completedAt: {
+      type: Date,
+      default: null,
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    completedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
 const taskSchema = new mongoose.Schema(
   {
     title: {
@@ -37,6 +68,7 @@ const taskSchema = new mongoose.Schema(
       default: 'PENDING',
       index: true,
     },
+    subtasks: [subtaskSchema],
     startDate: {
       type: Date,
       default: Date.now,

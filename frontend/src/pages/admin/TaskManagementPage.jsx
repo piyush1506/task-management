@@ -19,6 +19,8 @@ import {
   Send,
   History,
   CheckCircle2,
+  ListTodo,
+  Check,
 } from 'lucide-react';
 
 export default function TaskManagementPage() {
@@ -46,6 +48,10 @@ export default function TaskManagementPage() {
   const [formError, setFormError] = useState('');
   const [commentText, setCommentText] = useState('');
   const [commentLoading, setCommentLoading] = useState(false);
+
+  // Subtask management
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [subtaskLoading, setSubtaskLoading] = useState(false);
 
   // Task Form State
   const [formData, setFormData] = useState({
@@ -218,6 +224,72 @@ export default function TaskManagementPage() {
     }
   };
 
+  // Subtask handlers
+  const handleAddSubtask = async (e) => {
+    e.preventDefault();
+    if (!newSubtaskTitle.trim() || !selectedTask) return;
+
+    setSubtaskLoading(true);
+    try {
+      const res = await api.post(`/tasks/${selectedTask._id}/subtasks`, {
+        title: newSubtaskTitle.trim(),
+      });
+      if (res.data?.success) {
+        setNewSubtaskTitle('');
+        setSelectedTask((prev) => ({
+          ...prev,
+          subtasks: res.data.subtasks,
+          status: res.data.task?.status || prev.status,
+        }));
+        showToast('Subtask added');
+        fetchTasks();
+      }
+    } catch (err) {
+      alert('Failed to add subtask: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setSubtaskLoading(false);
+    }
+  };
+
+  const handleToggleSubtask = async (subtaskId, currentStatus) => {
+    if (!selectedTask) return;
+
+    try {
+      const res = await api.patch(`/tasks/${selectedTask._id}/subtasks/${subtaskId}`, {
+        isCompleted: !currentStatus,
+      });
+
+      if (res.data?.success) {
+        setSelectedTask((prev) => ({
+          ...prev,
+          subtasks: res.data.subtasks,
+          status: res.data.task?.status || prev.status,
+        }));
+        showToast(!currentStatus ? 'Subtask marked complete' : 'Subtask marked incomplete');
+        fetchTasks();
+      }
+    } catch (err) {
+      alert('Failed to update subtask');
+    }
+  };
+
+  const handleDeleteSubtask = async (subtaskId) => {
+    if (!selectedTask) return;
+    try {
+      const res = await api.delete(`/tasks/${selectedTask._id}/subtasks/${subtaskId}`);
+      if (res.data?.success) {
+        setSelectedTask((prev) => ({
+          ...prev,
+          subtasks: res.data.subtasks,
+        }));
+        showToast('Subtask removed');
+        fetchTasks();
+      }
+    } catch (err) {
+      alert('Failed to delete subtask');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Toast Notification */}
@@ -334,6 +406,7 @@ export default function TaskManagementPage() {
                 <th className="py-3.5 px-4">Task Title</th>
                 <th className="py-3.5 px-4">Project</th>
                 <th className="py-3.5 px-4">Assigned To</th>
+                <th className="py-3.5 px-4 text-center">Subtasks</th>
                 <th className="py-3.5 px-4 text-center">Priority</th>
                 <th className="py-3.5 px-4 text-center">Status</th>
                 <th className="py-3.5 px-4">Deadline</th>
@@ -343,18 +416,24 @@ export default function TaskManagementPage() {
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-12 text-slate-400">
+                  <td colSpan="8" className="text-center py-12 text-slate-400">
                     Loading task records...
                   </td>
                 </tr>
               ) : tasks.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-12 text-slate-400">
+                  <td colSpan="8" className="text-center py-12 text-slate-400">
                     No tasks found matching current filters
                   </td>
                 </tr>
               ) : (
-                tasks.map((task) => (
+                tasks.map((task) => {
+                  const sList = task.subtasks || [];
+                  const sTotal = sList.length;
+                  const sDone = sList.filter((s) => s.isCompleted).length;
+                  const sPercent = sTotal > 0 ? Math.round((sDone / sTotal) * 100) : 0;
+
+                  return (
                   <tr key={task._id} className="hover:bg-slate-50/60 transition-colors">
                     <td className="py-3.5 px-4">
                       <p className="font-semibold text-slate-900">{task.title}</p>
@@ -374,6 +453,40 @@ export default function TaskManagementPage() {
                           {task.assignedTo?.name || 'Unassigned'}
                         </span>
                       </div>
+                    </td>
+                    {/* Subtasks Column */}
+                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                      {sTotal === 0 ? (
+                        <button
+                          onClick={() => openDetails(task)}
+                          className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline font-medium cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Add subtask</span>
+                        </button>
+                      ) : (
+                        <div
+                          onClick={() => openDetails(task)}
+                          className="inline-block cursor-pointer group"
+                          title="Click to view & check subtasks"
+                        >
+                          <span
+                            className={`text-[11px] font-bold ${
+                              sDone === sTotal ? 'text-emerald-600' : 'text-slate-700'
+                            }`}
+                          >
+                            {sDone}/{sTotal} ({sPercent}%)
+                          </span>
+                          <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1 mx-auto">
+                            <div
+                              className={`h-full transition-all duration-300 ${
+                                sDone === sTotal ? 'bg-emerald-500' : 'bg-blue-600'
+                              }`}
+                              style={{ width: `${sPercent}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-center">
                       <PriorityBadge priority={task.priority} />
@@ -439,8 +552,9 @@ export default function TaskManagementPage() {
                       </div>
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })
+            )}
             </tbody>
           </table>
         </div>
@@ -721,6 +835,119 @@ export default function TaskManagementPage() {
                 <div>
                   Deadline: <strong className="text-slate-800">{new Date(selectedTask.deadline).toLocaleDateString()}</strong>
                 </div>
+              </div>
+            </div>
+
+            {/* Subtasks & Checklist Section */}
+            <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ListTodo className="w-4 h-4 text-blue-600" />
+                  <h4 className="font-bold text-slate-900 text-sm">
+                    Subtasks & Checklist (
+                    {(selectedTask.subtasks || []).filter((s) => s.isCompleted).length}/
+                    {(selectedTask.subtasks || []).length})
+                  </h4>
+                </div>
+                {(selectedTask.subtasks || []).length > 0 && (
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {Math.round(
+                      ((selectedTask.subtasks || []).filter((s) => s.isCompleted).length /
+                        (selectedTask.subtasks || []).length) *
+                        100
+                    )}
+                    % Done
+                  </span>
+                )}
+              </div>
+
+              {/* Progress bar */}
+              {(selectedTask.subtasks || []).length > 0 && (
+                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-300 ${
+                      (selectedTask.subtasks || []).filter((s) => s.isCompleted).length ===
+                      (selectedTask.subtasks || []).length
+                        ? 'bg-emerald-500'
+                        : 'bg-blue-600'
+                    }`}
+                    style={{
+                      width: `${Math.round(
+                        ((selectedTask.subtasks || []).filter((s) => s.isCompleted).length /
+                          (selectedTask.subtasks || []).length) *
+                          100
+                      )}%`,
+                    }}
+                  ></div>
+                </div>
+              )}
+
+              {/* Add Subtask Form */}
+              <form onSubmit={handleAddSubtask} className="flex gap-2 pt-1">
+                <input
+                  type="text"
+                  placeholder="Add a new subtask (press Enter to save)..."
+                  value={newSubtaskTitle}
+                  onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-xs focus:outline-none focus:border-blue-600"
+                />
+                <button
+                  type="submit"
+                  disabled={subtaskLoading || !newSubtaskTitle.trim()}
+                  className="inline-flex items-center gap-1 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add</span>
+                </button>
+              </form>
+
+              {/* Subtasks List */}
+              <div className="divide-y divide-slate-100 pt-1">
+                {(selectedTask.subtasks || []).length === 0 ? (
+                  <p className="text-center py-3 text-slate-400 text-xs italic">
+                    No subtasks yet. Add checklist items above to track progress.
+                  </p>
+                ) : (
+                  selectedTask.subtasks.map((st) => (
+                    <div
+                      key={st._id}
+                      className="py-2.5 flex items-center justify-between gap-3 group hover:bg-slate-50/50 px-2 rounded-lg transition-colors"
+                    >
+                      <div
+                        onClick={() => handleToggleSubtask(st._id, st.isCompleted)}
+                        className="flex items-center gap-3 flex-1 cursor-pointer select-none"
+                      >
+                        <div
+                          className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                            st.isCompleted
+                              ? 'bg-emerald-600 border-emerald-600 text-white'
+                              : 'border-slate-300 hover:border-blue-500 bg-white'
+                          }`}
+                        >
+                          {st.isCompleted && <Check className="w-3 h-3 stroke-[3]" />}
+                        </div>
+
+                        <span
+                          className={`text-xs transition-colors ${
+                            st.isCompleted
+                              ? 'line-through text-slate-400 font-normal'
+                              : 'text-slate-800 font-semibold'
+                          }`}
+                        >
+                          {st.title}
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => handleDeleteSubtask(st._id)}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-600 rounded transition-opacity cursor-pointer"
+                        title="Delete subtask"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
