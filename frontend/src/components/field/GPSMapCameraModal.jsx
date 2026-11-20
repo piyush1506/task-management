@@ -13,12 +13,21 @@ import {
   Send,
   FlipHorizontal,
   Navigation,
+  LogIn,
+  LogOut,
+  Clock,
 } from 'lucide-react';
 
-export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
+export default function GPSMapCameraModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  initialType = 'CHECK_IN',
+}) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
+  const [checkType, setCheckType] = useState(initialType);
   const [stream, setStream] = useState(null);
   const [facingMode, setFacingMode] = useState('user'); // 'user' for selfie, 'environment' for back
   const [cameraActive, setCameraActive] = useState(false);
@@ -42,7 +51,9 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
   const [submitError, setSubmitError] = useState('');
 
   // Form inputs
-  const [purpose, setPurpose] = useState('CLIENT_VISIT');
+  const [purpose, setPurpose] = useState(
+    initialType === 'CHECK_OUT' ? 'SHIFT_END' : 'CLIENT_VISIT'
+  );
   const [notes, setNotes] = useState('');
 
   // Start Camera
@@ -159,13 +170,15 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
     if (isOpen) {
       setCapturedPhoto(null);
       setSubmitError('');
+      setCheckType(initialType);
+      setPurpose(initialType === 'CHECK_OUT' ? 'SHIFT_END' : 'CLIENT_VISIT');
       fetchLocation();
       startCamera('user');
     } else {
       stopCamera();
     }
     return () => stopCamera();
-  }, [isOpen]);
+  }, [isOpen, initialType]);
 
   // Capture photo and stamp GPS watermark onto canvas
   const captureAndStamp = () => {
@@ -181,11 +194,10 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
     const ctx = canvas.getContext('2d');
 
     // 1. Draw raw video frame
-    // If selfie camera, un-mirror on the final photo for natural orientation
     ctx.drawImage(video, 0, 0, width, height);
 
     // 2. Draw GPS Map Camera watermark overlay (styled exactly as reference photo)
-    const overlayHeight = Math.max(160, Math.round(height * 0.28));
+    const overlayHeight = Math.max(165, Math.round(height * 0.29));
     const overlayY = height - overlayHeight - 20;
     const overlayX = 20;
     const overlayWidth = width - 40;
@@ -248,25 +260,50 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
     ctx.fillRect(mapX, mapY + mapSize - 20, mapSize, 20);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 10px sans-serif';
-    ctx.fillText('GPS Map', mapX + 8, mapY + mapSize - 6);
+    ctx.fillText('Google', mapX + 8, mapY + mapSize - 6);
 
-    // 4. Geolocation Text Content on the Right
-    const textX = mapX + mapSize + 18;
+    // 4. Information Column on Right
+    const textX = mapX + mapSize + 16;
     let textY = overlayY + 28;
-    const availableWidth = overlayWidth - mapSize - 40;
 
-    // Heading: City, State, Country
+    // Heading: City, State, Country + Check-In / Check-Out Stamp Tag
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px sans-serif';
-    const locationHeading = `${geoData.city || 'Local Area'}, ${geoData.state || 'Rajasthan'}, ${geoData.country || 'India'} 🇮🇳`;
-    ctx.fillText(locationHeading, textX, textY);
+    ctx.font = 'bold 17px sans-serif';
+    const cityHead = `${geoData.city || 'Local Site'}, ${geoData.state || 'Rajasthan'}, ${geoData.country || 'India'}`;
+    ctx.fillText(cityHead, textX, textY);
+
+    // Status Badge (CHECK-IN / CHECK-OUT) inline
+    const isCheckIn = checkType === 'CHECK_IN';
+    const statusText = isCheckIn ? '● CHECK-IN' : '● CHECK-OUT';
+    const statusBadgeColor = isCheckIn ? '#10b981' : '#f43f5e';
+    const statusBadgeX = textX + ctx.measureText(cityHead).width + 12;
+
+    if (statusBadgeX + 90 < overlayX + overlayWidth - 140) {
+      ctx.fillStyle = statusBadgeColor;
+      ctx.beginPath();
+      ctx.roundRect(statusBadgeX, textY - 14, 88, 18, 4);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText(statusText, statusBadgeX + 8, textY - 1);
+    }
+
     textY += 20;
 
-    // Address (clamped to fit)
-    ctx.fillStyle = '#cbd5e1'; // slate-300
+    // Detailed Street Address
+    ctx.fillStyle = '#e2e8f0';
     ctx.font = '12px sans-serif';
-    const addressLine = geoData.address.length > 70 ? geoData.address.substring(0, 68) + '...' : geoData.address;
-    ctx.fillText(addressLine, textX, textY);
+    const maxAddrWidth = overlayWidth - (textX - overlayX) - 20;
+    const addressLine = geoData.address || `${geoData.city}, ${geoData.state}`;
+    // Truncate or wrap to max width
+    let displayLine = addressLine;
+    if (ctx.measureText(displayLine).width > maxAddrWidth) {
+      while (ctx.measureText(displayLine + '...').width > maxAddrWidth && displayLine.length > 20) {
+        displayLine = displayLine.slice(0, -3);
+      }
+      displayLine += '...';
+    }
+    ctx.fillText(displayLine, textX, textY);
     textY += 18;
 
     // Latitude & Longitude Line
@@ -295,21 +332,25 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
     textY += 16;
 
     // Note / Field Purpose
-    ctx.fillStyle = '#f59e0b'; // amber-500
+    ctx.fillStyle = isCheckIn ? '#34d399' : '#fbbf24'; // emerald-400 or amber-400
     ctx.font = 'bold 11px sans-serif';
-    const cleanPurpose = purpose.replace('_', ' ');
-    ctx.fillText(`Note : Verified by GPS Map Camera • ${cleanPurpose}`, textX, textY);
+    const cleanPurpose = purpose.replace(/_/g, ' ');
+    ctx.fillText(
+      `Note : Verified by GPS Map Camera • ${isCheckIn ? 'CHECK-IN' : 'CHECK-OUT'} • ${cleanPurpose}`,
+      textX,
+      textY
+    );
 
     // 5. Small GPS Map Camera Badge in top-right corner of card
-    const badgeX = overlayX + overlayWidth - 140;
+    const badgeX = overlayX + overlayWidth - 150;
     const badgeY = overlayY + 12;
     ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
     ctx.beginPath();
-    ctx.roundRect(badgeX, badgeY, 128, 22, 6);
+    ctx.roundRect(badgeX, badgeY, 138, 22, 6);
     ctx.fill();
-    ctx.fillStyle = '#38bdf8';
+    ctx.fillStyle = isCheckIn ? '#38bdf8' : '#fb7185';
     ctx.font = 'bold 10px sans-serif';
-    ctx.fillText('📷 GPS Map Camera', badgeX + 10, badgeY + 15);
+    ctx.fillText(`📷 GPS Map Camera [${isCheckIn ? 'IN' : 'OUT'}]`, badgeX + 8, badgeY + 15);
 
     ctx.restore();
 
@@ -332,6 +373,7 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
 
     try {
       const payload = {
+        type: checkType,
         photo: capturedPhoto,
         latitude: geoData.latitude,
         longitude: geoData.longitude,
@@ -348,9 +390,12 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
       if (res.data?.success) {
         if (onSuccess) onSuccess(res.data.checkIn);
         onClose();
+      } else {
+        setSubmitError(res.data?.message || 'Failed to submit check-in');
       }
     } catch (err) {
-      setSubmitError(err.response?.data?.message || err.message || 'Failed to submit field check-in');
+      console.error('Submission failed:', err);
+      setSubmitError(err.response?.data?.message || 'Server error submitting check-in');
     } finally {
       setSubmitting(false);
     }
@@ -358,25 +403,36 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
 
   if (!isOpen) return null;
 
+  const isCheckIn = checkType === 'CHECK_IN';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden animate-scaleUp">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-100 bg-slate-50/60">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+        {/* Modal Header */}
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
-              <Camera className="w-4 h-4" />
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center text-white ${
+                isCheckIn ? 'bg-emerald-600' : 'bg-rose-600'
+              } shadow-sm`}
+            >
+              {isCheckIn ? <LogIn className="w-5 h-5" /> : <LogOut className="w-5 h-5" />}
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900 leading-tight">GPS Map Camera Check-in</h3>
-              <p className="text-[11px] text-slate-500">Live Selfie & Real-Time Geolocation Stamping</p>
+              <h3 className="font-bold text-slate-900 text-sm">
+                GPS Map Camera & Geolocation Attendance
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Official Geotagged Watermark with Real-Time Coordinates
+              </p>
             </div>
           </div>
+
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -389,13 +445,48 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
             </div>
           )}
 
+          {/* CHECK-IN vs CHECK-OUT Selector Tabs */}
+          <div className="bg-slate-100 p-1 rounded-2xl flex items-center gap-1 border border-slate-200/80">
+            <button
+              type="button"
+              onClick={() => {
+                setCheckType('CHECK_IN');
+                setPurpose('CLIENT_VISIT');
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                checkType === 'CHECK_IN'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+              }`}
+            >
+              <LogIn className="w-4 h-4" />
+              <span>Check-In (Arrival / Duty Start)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCheckType('CHECK_OUT');
+                setPurpose('SHIFT_END');
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                checkType === 'CHECK_OUT'
+                  ? 'bg-rose-600 text-white shadow-md shadow-rose-600/25'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+              }`}
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Check-Out (Departure / Duty End)</span>
+            </button>
+          </div>
+
           {/* Camera Viewport or Captured Stamped Preview */}
           <div className="relative aspect-video w-full bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center">
             {capturedPhoto ? (
               // Captured Stamped Photo Preview
               <img
                 src={capturedPhoto}
-                alt="GPS Stamped Field Check-in"
+                alt="GPS Stamped Field Verification"
                 className="w-full h-full object-cover"
               />
             ) : (
@@ -414,7 +505,7 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
                     <p className="text-xs text-slate-200 max-w-sm mb-3">{cameraError}</p>
                     <button
                       onClick={() => startCamera(facingMode)}
-                      className="px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold"
+                      className="px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold cursor-pointer"
                     >
                       Retry Camera
                     </button>
@@ -423,12 +514,20 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
 
                 {/* Live GPS status pill overlay on camera */}
                 <div className="absolute top-3 left-3 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20 text-white text-[11px] font-semibold flex items-center gap-2 shadow-lg">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      isCheckIn ? 'bg-emerald-500' : 'bg-rose-500'
+                    } animate-pulse`}
+                  ></span>
+                  <span className="font-bold">
+                    {isCheckIn ? 'CHECK-IN' : 'CHECK-OUT'}:
+                  </span>
                   {locationLoading ? (
                     <span className="text-slate-300">Acquiring GPS fix...</span>
                   ) : (
                     <span>
-                      {geoData.city || 'GPS Active'} • {geoData.latitude.toFixed(4)}°, {geoData.longitude.toFixed(4)}°
+                      {geoData.city || 'GPS Active'} • {geoData.latitude.toFixed(4)}°,{' '}
+                      {geoData.longitude.toFixed(4)}°
                     </span>
                   )}
                 </div>
@@ -438,7 +537,7 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
                   type="button"
                   onClick={toggleCamera}
                   title="Switch Camera (Front / Back)"
-                  className="absolute top-3 right-3 p-2 bg-slate-900/70 hover:bg-slate-900 text-white rounded-full backdrop-blur-md border border-white/20 shadow-md transition-all"
+                  className="absolute top-3 right-3 p-2 bg-slate-900/70 hover:bg-slate-900 text-white rounded-full backdrop-blur-md border border-white/20 shadow-md transition-all cursor-pointer"
                 >
                   <FlipHorizontal className="w-4 h-4" />
                 </button>
@@ -452,26 +551,50 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
           {/* Form details (Purpose & Notes) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Field Purpose *</label>
+              <label className="block font-semibold text-slate-700 mb-1">
+                {isCheckIn ? 'Check-In Purpose *' : 'Check-Out Reason / Summary *'}
+              </label>
               <select
                 value={purpose}
                 onChange={(e) => setPurpose(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
-                <option value="CLIENT_VISIT">Client Site Visit</option>
-                <option value="SITE_INSPECTION">Site Inspection / Survey</option>
-                <option value="OFFICE_COMMUTE">Commute / Field Travel</option>
-                <option value="OFFSITE_MEETING">Offsite Team Meeting</option>
-                <option value="DELIVERY_DISPATCH">Equipment / Material Delivery</option>
-                <option value="OTHER">Other Out of Office Work</option>
+                {isCheckIn ? (
+                  <>
+                    <option value="CLIENT_VISIT">Client Site Visit</option>
+                    <option value="SITE_INSPECTION">Site Inspection / Survey</option>
+                    <option value="SHIFT_START">Regular Shift Reporting</option>
+                    <option value="OFFICE_COMMUTE">Commute / Travel Arrival</option>
+                    <option value="OFFSITE_MEETING">Offsite Team Meeting</option>
+                    <option value="DELIVERY">Delivery Pickup / Dispatch</option>
+                    <option value="MARKETING">Marketing Campaign / Roadshow</option>
+                    <option value="MAINTENANCE">Technical Support / Maintenance</option>
+                    <option value="OTHER">Other Field Work</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="SHIFT_END">End of Shift / Duty Departure</option>
+                    <option value="CLIENT_VISIT">Completed Client Meeting</option>
+                    <option value="SITE_INSPECTION">Finished Site Inspection</option>
+                    <option value="DELIVERY">Delivery Completed</option>
+                    <option value="OFFICE_COMMUTE">Commute Home / Departure</option>
+                    <option value="OTHER">Other Work Completion</option>
+                  </>
+                )}
               </select>
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Optional Field Note</label>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Optional Notes / Remarks
+              </label>
               <input
                 type="text"
-                placeholder="e.g. Meeting with client manager..."
+                placeholder={
+                  isCheckIn
+                    ? 'e.g. Arrived at client office...'
+                    : 'e.g. Meeting finished, deliverables handed over...'
+                }
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
@@ -497,7 +620,7 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
               onClick={fetchLocation}
               title="Refresh GPS Coordinates"
               disabled={locationLoading}
-              className="text-slate-400 hover:text-blue-600 p-1"
+              className="text-slate-400 hover:text-blue-600 p-1 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${locationLoading ? 'animate-spin' : ''}`} />
             </button>
@@ -509,7 +632,7 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-xl text-xs font-semibold"
+            className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-xl text-xs font-semibold cursor-pointer"
           >
             Cancel
           </button>
@@ -520,7 +643,7 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
                 <button
                   type="button"
                   onClick={handleRetake}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" /> Retake
                 </button>
@@ -528,16 +651,23 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
                   type="button"
                   onClick={handleSubmit}
                   disabled={submitting}
-                  className="inline-flex items-center gap-1.5 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+                  className={`inline-flex items-center gap-1.5 px-5 py-2.5 ${
+                    isCheckIn
+                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
+                      : 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20'
+                  } text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50 cursor-pointer`}
                 >
                   {submitting ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Verifying & Saving...</span>
+                      <span>Verifying & Recording...</span>
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 className="w-4 h-4" /> Confirm & Check In
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>
+                        {isCheckIn ? 'Confirm & Punch Check-In' : 'Confirm & Punch Check-Out'}
+                      </span>
                     </>
                   )}
                 </button>
@@ -547,9 +677,14 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
                 type="button"
                 onClick={captureAndStamp}
                 disabled={!cameraActive}
-                className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-md shadow-blue-500/20 transition-all disabled:opacity-50"
+                className={`inline-flex items-center gap-2 px-6 py-2.5 ${
+                  isCheckIn
+                    ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
+                    : 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20'
+                } text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50 cursor-pointer`}
               >
-                <Camera className="w-4 h-4" /> Snap & Stamp Photo
+                <Camera className="w-4 h-4" />
+                <span>Take {isCheckIn ? 'Check-In' : 'Check-Out'} Selfie</span>
               </button>
             )}
           </div>
@@ -558,4 +693,3 @@ export default function GPSMapCameraModal({ isOpen, onClose, onSuccess }) {
     </div>
   );
 }
-

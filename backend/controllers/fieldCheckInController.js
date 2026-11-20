@@ -3,12 +3,13 @@ const ActivityLog = require('../models/ActivityLog');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 
-// @desc    Create a new field check-in with GPS photo & coordinates
+// @desc    Create a new field check-in or check-out with GPS photo & coordinates
 // @route   POST /api/field-checkins
 // @access  Private (Employee or Admin)
 const createCheckIn = async (req, res, next) => {
   try {
     const {
+      type,
       photo,
       latitude,
       longitude,
@@ -30,8 +31,11 @@ const createCheckIn = async (req, res, next) => {
       });
     }
 
+    const checkType = type === 'CHECK_OUT' ? 'CHECK_OUT' : 'CHECK_IN';
+
     const checkIn = await FieldCheckIn.create({
       employee: req.user._id,
+      type: checkType,
       photo,
       latitude: parseFloat(latitude),
       longitude: parseFloat(longitude),
@@ -40,7 +44,7 @@ const createCheckIn = async (req, res, next) => {
       city: city || '',
       state: state || '',
       country: country || 'India',
-      purpose: purpose || 'CLIENT_VISIT',
+      purpose: purpose || (checkType === 'CHECK_OUT' ? 'SHIFT_END' : 'CLIENT_VISIT'),
       notes: notes || '',
       project: project || null,
       task: task || null,
@@ -54,12 +58,15 @@ const createCheckIn = async (req, res, next) => {
 
     // Create activity audit log
     const locDescription = city ? `${city}, ${state || ''}` : `${latitude.toFixed(4)}°, ${longitude.toFixed(4)}°`;
+    const actionLabel = checkType === 'CHECK_OUT' ? 'Check-out' : 'Check-in';
+    const auditAction = checkType === 'CHECK_OUT' ? 'FIELD_CHECKOUT' : 'FIELD_CHECKIN';
+
     await ActivityLog.create({
       user: req.user._id,
-      action: 'FIELD_CHECKIN',
+      action: auditAction,
       entityType: 'EMPLOYEE',
       entityId: checkIn._id,
-      description: `${req.user.name} logged field check-in at ${locDescription} (${purpose?.replace('_', ' ') || 'Out of Office'})`,
+      description: `${req.user.name} logged field ${actionLabel.toLowerCase()} at ${locDescription} (${purpose?.replace('_', ' ') || 'Out of Office'})`,
     });
 
     // Notify administrators
@@ -68,8 +75,8 @@ const createCheckIn = async (req, res, next) => {
       for (const admin of admins) {
         await Notification.create({
           user: admin._id,
-          title: 'Field Check-in Received',
-          message: `${req.user.name} checked in from ${locDescription} (${purpose?.replace('_', ' ') || 'Field Work'}).`,
+          title: `Field ${actionLabel} Logged`,
+          message: `${req.user.name} ${actionLabel.toLowerCase()} at ${locDescription} (${purpose?.replace('_', ' ') || 'Field Work'}).`,
           relatedEntityType: 'EMPLOYEE',
           relatedEntityId: req.user._id,
         });
@@ -80,7 +87,7 @@ const createCheckIn = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'Field check-in recorded successfully with live GPS watermark',
+      message: `Field ${actionLabel.toLowerCase()} recorded successfully with live GPS watermark`,
       checkIn: populatedCheckIn,
     });
   } catch (err) {
@@ -93,7 +100,7 @@ const createCheckIn = async (req, res, next) => {
 // @access  Private (Admin only)
 const getAllCheckIns = async (req, res, next) => {
   try {
-    const { employee, purpose, startDate, endDate, limit = 50 } = req.query;
+    const { employee, purpose, type, startDate, endDate, limit = 100 } = req.query;
 
     const query = {};
 
@@ -103,6 +110,10 @@ const getAllCheckIns = async (req, res, next) => {
 
     if (purpose && purpose !== 'ALL') {
       query.purpose = purpose;
+    }
+
+    if (type && type !== 'ALL') {
+      query.type = type;
     }
 
     if (startDate || endDate) {
@@ -138,17 +149,78 @@ const getAllCheckIns = async (req, res, next) => {
 // @access  Private (Employee or Admin)
 const getMyCheckIns = async (req, res, next) => {
   try {
-    const checkIns = await FieldCheckIn.find({ employee: req.user._id })
+    const { type, limit = 50 } = req.query;
+    const query = { employee: req.user._id };
+
+    if (type && type !== 'ALL') {
+      query.type = type;
+    }
+
+    const checkIns = await FieldCheckIn.find(query)
       .populate('project', 'title')
       .populate('task', 'title')
       .sort({ timestamp: -1 })
-      .limit(30)
+      .limit(parseInt(limit, 10))
       .lean();
 
     res.status(200).json({
       success: true,
       count: checkIns.length,
       checkIns,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get current employee's live attendance status (Checked In vs Checked Out)
+// @route   GET /api/field-checkins/status
+// @access  Private (Employee or Admin)
+const getCurrentStatus = async (req, res, next) => {
+  try {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const todayRecords = await FieldCheckIn.find({
+      employee: req.user._id,
+      timestamp: { $gte: startOfToday },
+    })
+      .sort({ timestamp: -1 })
+      .lean();
+
+    const lastRecord = todayRecords[0] || null;
+    let currentStatus = 'NOT_CHECKED_IN';
+
+    if (lastRecord) {
+      currentStatus = lastRecord.type === 'CHECK_IN' ? 'CHECKED_IN' : 'CHECKED_OUT';
+    }
+
+    // Find first check in of today
+    const checkInsToday = todayRecords.filter((r) => r.type === 'CHECK_IN');
+    const checkOutsToday = todayRecords.filter((r) => r.type === 'CHECK_OUT');
+
+    const firstCheckIn = checkInsToday.length > 0 ? checkInsToday[checkInsToday.length - 1] : null;
+    const lastCheckOut = checkOutsToday.length > 0 ? checkOutsToday[0] : null;
+
+    // Calculate approximate work minutes today
+    let totalWorkMinutes = 0;
+    if (firstCheckIn) {
+      const endTime = lastCheckOut && currentStatus === 'CHECKED_OUT'
+        ? new Date(lastCheckOut.timestamp)
+        : new Date();
+      totalWorkMinutes = Math.max(0, Math.round((endTime - new Date(firstCheckIn.timestamp)) / 60000));
+    }
+
+    res.status(200).json({
+      success: true,
+      currentStatus,
+      todaySummary: {
+        firstCheckIn,
+        lastCheckOut,
+        totalWorkMinutes,
+        recordsCount: todayRecords.length,
+      },
+      lastRecord,
     });
   } catch (err) {
     next(err);
@@ -197,6 +269,7 @@ module.exports = {
   createCheckIn,
   getAllCheckIns,
   getMyCheckIns,
+  getCurrentStatus,
   getCheckInById,
 };
 
