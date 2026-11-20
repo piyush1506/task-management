@@ -18,13 +18,18 @@ const PORT = process.env.PORT || 5000;
 connectDB();
 
 // Core Middleware
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
-    // Allow local development and local Wi-Fi / LAN network access
+    // Allow local development and local Wi-Fi / LAN network access (reflect origin)
     callback(null, true);
   },
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
