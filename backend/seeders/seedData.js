@@ -195,9 +195,12 @@ const seedInitialData = async () => {
     ]);
 
     // 7. Seed Demonstration Field Check-in
+    const samplePhoto = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+
     await FieldCheckIn.create([
       {
         employee: rahul._id,
+        photo: samplePhoto,
         latitude: 25.351463,
         longitude: 74.632922,
         accuracy: 12,
@@ -211,6 +214,7 @@ const seedInitialData = async () => {
       },
       {
         employee: priya._id,
+        photo: samplePhoto,
         latitude: 25.340021,
         longitude: 74.640118,
         accuracy: 15,
