@@ -99,3 +99,4 @@ siteVisitSchema.index({ employee: 1, timestamp: -1 });
 const SiteVisit = mongoose.model('SiteVisit', siteVisitSchema);
 
 module.exports = SiteVisit;
+

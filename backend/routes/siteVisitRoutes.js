@@ -18,3 +18,4 @@ router.get('/my', getMySiteVisits);
 router.get('/daily-route', getDailyRoute);
 
 module.exports = router;
+
