@@ -5,6 +5,7 @@ const ActivityLog = require('../models/ActivityLog');
 const Notification = require('../models/Notification');
 const Comment = require('../models/Comment');
 const FieldCheckIn = require('../models/FieldCheckIn');
+const SiteVisit = require('../models/SiteVisit');
 
 const seedInitialData = async () => {
   try {
@@ -225,6 +226,44 @@ const seedInitialData = async () => {
         purpose: 'SITE_INSPECTION',
         notes: 'On-site UI validation and client walkthrough',
         timestamp: new Date(Date.now() - 3600000 * 2),
+      },
+    ]);
+
+    // 8. Seed Demonstration Site Destination Visits (Daily Travel Route)
+    await SiteVisit.create([
+      {
+        employee: rahul._id,
+        destinationName: 'Apex Healthcare Hospital Project',
+        contactPerson: 'Dr. R.K. Sharma',
+        contactPhone: '+91 98290 11223',
+        purpose: 'SITE_INSPECTION',
+        workDone: 'Inspected network conduit cabling on 2nd and 3rd floors. Verified equipment room power setup.',
+        photo: samplePhoto,
+        latitude: 25.358210,
+        longitude: 74.639120,
+        accuracy: 10,
+        address: 'Near Old Bus Stand, Bhilwara, Rajasthan',
+        city: 'Bhilwara',
+        state: 'Rajasthan',
+        stopNumber: 1,
+        timestamp: new Date(Date.now() - 3600000 * 3), // 3 hours ago
+      },
+      {
+        employee: rahul._id,
+        destinationName: 'Shree Krishna Logistics Hub',
+        contactPerson: 'Manoj Kumar (Site Incharge)',
+        contactPhone: '+91 94141 55667',
+        purpose: 'DELIVERY',
+        workDone: 'Delivered hardware terminals and obtained signed acknowledgment receipt.',
+        photo: samplePhoto,
+        latitude: 25.365440,
+        longitude: 74.648930,
+        accuracy: 14,
+        address: 'RIICO Industrial Area, Bhilwara, Rajasthan',
+        city: 'Bhilwara',
+        state: 'Rajasthan',
+        stopNumber: 2,
+        timestamp: new Date(Date.now() - 3600000 * 1.5), // 1.5 hours ago
       },
     ]);
 

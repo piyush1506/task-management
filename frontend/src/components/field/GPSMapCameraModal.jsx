@@ -7,36 +7,51 @@ import {
   CheckCircle2,
   AlertCircle,
   X,
-  Compass,
-  Building,
   RotateCcw,
-  Send,
   FlipHorizontal,
-  Navigation,
   LogIn,
   LogOut,
-  Clock,
+  Building2,
+  User,
+  Phone,
+  FileText,
 } from 'lucide-react';
 
 export default function GPSMapCameraModal({
   isOpen,
   onClose,
   onSuccess,
-  initialType = 'CHECK_IN',
+  mode = 'ATTENDANCE', // 'ATTENDANCE' | 'DESTINATION'
+  initialType = 'CHECK_IN', // 'CHECK_IN' | 'CHECK_OUT'
+  nextStopNumber = 1,
 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
+  // Attendance vs Destination mode
+  const isDestinationMode = mode === 'DESTINATION';
   const [checkType, setCheckType] = useState(initialType);
+
+  // Destination specific inputs
+  const [destinationName, setDestinationName] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [workDone, setWorkDone] = useState('');
+
+  // Common inputs
+  const [purpose, setPurpose] = useState('CLIENT_VISIT');
+  const [notes, setNotes] = useState('');
+
+  // Camera state
   const [stream, setStream] = useState(null);
-  const [facingMode, setFacingMode] = useState('user'); // 'user' for selfie, 'environment' for back
+  const [facingMode, setFacingMode] = useState('user');
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState('');
 
-  // Live GPS state
+  // GPS state
   const [locationLoading, setLocationLoading] = useState(true);
   const [geoData, setGeoData] = useState({
-    latitude: 25.351463, // default demo coordinates
+    latitude: 25.351463,
     longitude: 74.632922,
     accuracy: 12,
     address: 'Inder Pratash Tower, Bhopal Ganj, Bhilwara, Rajasthan 311001, India',
@@ -45,18 +60,10 @@ export default function GPSMapCameraModal({
     country: 'India',
   });
 
-  // Captured state
   const [capturedPhoto, setCapturedPhoto] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  // Form inputs
-  const [purpose, setPurpose] = useState(
-    initialType === 'CHECK_OUT' ? 'SHIFT_END' : 'CLIENT_VISIT'
-  );
-  const [notes, setNotes] = useState('');
-
-  // Start Camera
   const startCamera = async (facing = facingMode) => {
     setCameraError('');
     if (stream) {
@@ -86,7 +93,6 @@ export default function GPSMapCameraModal({
     }
   };
 
-  // Stop Camera
   const stopCamera = () => {
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
@@ -95,14 +101,12 @@ export default function GPSMapCameraModal({
     setCameraActive(false);
   };
 
-  // Switch between front and back camera
   const toggleCamera = () => {
     const nextMode = facingMode === 'user' ? 'environment' : 'user';
     setFacingMode(nextMode);
     startCamera(nextMode);
   };
 
-  // Live Geolocation acquisition & reverse geocoding
   const fetchLocation = () => {
     setLocationLoading(true);
     if (!navigator.geolocation) {
@@ -117,10 +121,9 @@ export default function GPSMapCameraModal({
         const acc = Math.round(pos.coords.accuracy || 10);
 
         try {
-          // Reverse geocoding via OpenStreetMap Nominatim
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-            { headers: { 'User-Agent': 'WorkSphere-GPS-Camera/1.0' } }
+            { headers: { 'User-Agent': 'WorkSphere-Field-System/1.0' } }
           );
           if (res.ok) {
             const data = await res.json();
@@ -159,7 +162,7 @@ export default function GPSMapCameraModal({
         }
       },
       (err) => {
-        console.warn('Geolocation error:', err.message);
+        console.warn('Geolocation warning:', err.message);
         setLocationLoading(false);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
@@ -171,18 +174,39 @@ export default function GPSMapCameraModal({
       setCapturedPhoto(null);
       setSubmitError('');
       setCheckType(initialType);
-      setPurpose(initialType === 'CHECK_OUT' ? 'SHIFT_END' : 'CLIENT_VISIT');
+
+      if (isDestinationMode) {
+        setPurpose('CLIENT_MEETING');
+        setDestinationName('');
+        setContactPerson('');
+        setContactPhone('');
+        setWorkDone('');
+      } else {
+        setPurpose(initialType === 'CHECK_OUT' ? 'SHIFT_END' : 'CLIENT_VISIT');
+        setNotes('');
+      }
+
       fetchLocation();
       startCamera('user');
     } else {
       stopCamera();
     }
     return () => stopCamera();
-  }, [isOpen, initialType]);
+  }, [isOpen, initialType, mode]);
 
-  // Capture photo and stamp GPS watermark onto canvas
   const captureAndStamp = () => {
     if (!videoRef.current || !canvasRef.current) return;
+
+    if (isDestinationMode) {
+      if (!destinationName.trim()) {
+        setSubmitError('Please enter the destination or site name before taking photo.');
+        return;
+      }
+      if (!workDone.trim()) {
+        setSubmitError('Please briefly state the work done or reason for visit.');
+        return;
+      }
+    }
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -193,53 +217,51 @@ export default function GPSMapCameraModal({
     canvas.height = height;
     const ctx = canvas.getContext('2d');
 
-    // 1. Draw raw video frame
+    // 1. Draw camera video frame
     ctx.drawImage(video, 0, 0, width, height);
 
-    // 2. Draw GPS Map Camera watermark overlay (styled exactly as reference photo)
+    // 2. Draw watermark card (matching real reference photo)
     const overlayHeight = Math.max(165, Math.round(height * 0.29));
     const overlayY = height - overlayHeight - 20;
     const overlayX = 20;
     const overlayWidth = width - 40;
-    const radius = 16;
+    const radius = 14;
 
-    // Background translucent dark card
     ctx.save();
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)'; // slate-900 / 88%
+    // Solid dark card
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
     ctx.beginPath();
     ctx.roundRect(overlayX, overlayY, overlayWidth, overlayHeight, radius);
     ctx.fill();
 
-    // Subtle border
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
     ctx.stroke();
 
-    // 3. Mini Map Graphic on the Left
+    // 3. Mini map on left
     const mapSize = overlayHeight - 24;
     const mapX = overlayX + 12;
     const mapY = overlayY + 12;
 
-    // Draw stylized map background (satellite / street representation)
-    ctx.fillStyle = '#223843';
+    ctx.fillStyle = '#1e293b';
     ctx.beginPath();
-    ctx.roundRect(mapX, mapY, mapSize, mapSize, 10);
+    ctx.roundRect(mapX, mapY, mapSize, mapSize, 8);
     ctx.fill();
 
-    // Stylized road lines on mini-map
+    // Roads representation
     ctx.strokeStyle = '#475569';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(mapX + 10, mapY + mapSize * 0.3);
-    ctx.lineTo(mapX + mapSize - 10, mapY + mapSize * 0.7);
-    ctx.moveTo(mapX + mapSize * 0.6, mapY + 10);
-    ctx.lineTo(mapX + mapSize * 0.4, mapY + mapSize - 10);
+    ctx.moveTo(mapX + 8, mapY + mapSize * 0.35);
+    ctx.lineTo(mapX + mapSize - 8, mapY + mapSize * 0.65);
+    ctx.moveTo(mapX + mapSize * 0.55, mapY + 8);
+    ctx.lineTo(mapX + mapSize * 0.45, mapY + mapSize - 8);
     ctx.stroke();
 
-    // Red location pin in center of mini-map
+    // Red location pin
     const pinX = mapX + mapSize / 2;
     const pinY = mapY + mapSize / 2 - 4;
-    ctx.fillStyle = '#ef4444'; // Red-500
+    ctx.fillStyle = '#ef4444';
     ctx.beginPath();
     ctx.arc(pinX, pinY - 8, 8, 0, Math.PI * 2);
     ctx.fill();
@@ -249,71 +271,81 @@ export default function GPSMapCameraModal({
     ctx.lineTo(pinX, pinY + 8);
     ctx.closePath();
     ctx.fill();
-    // Inner white dot
+
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.arc(pinX, pinY - 8, 3, 0, Math.PI * 2);
     ctx.fill();
 
-    // "Google" or "WorkSphere Map" badge on mini map bottom
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(mapX, mapY + mapSize - 20, mapSize, 20);
+    // Map label
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(mapX, mapY + mapSize - 18, mapSize, 18);
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.fillText('Google', mapX + 8, mapY + mapSize - 6);
+    ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('Google', mapX + 8, mapY + mapSize - 5);
 
-    // 4. Information Column on Right
+    // 4. Information Columns on Right
     const textX = mapX + mapSize + 16;
     let textY = overlayY + 28;
 
-    // Heading: City, State, Country + Check-In / Check-Out Stamp Tag
+    // Heading: Destination Name or City
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 17px sans-serif';
-    const cityHead = `${geoData.city || 'Local Site'}, ${geoData.state || 'Rajasthan'}, ${geoData.country || 'India'}`;
-    ctx.fillText(cityHead, textX, textY);
+    ctx.font = 'bold 16px sans-serif';
 
-    // Status Badge (CHECK-IN / CHECK-OUT) inline
-    const isCheckIn = checkType === 'CHECK_IN';
-    const statusText = isCheckIn ? '● CHECK-IN' : '● CHECK-OUT';
-    const statusBadgeColor = isCheckIn ? '#10b981' : '#f43f5e';
-    const statusBadgeX = textX + ctx.measureText(cityHead).width + 12;
+    let heading = isDestinationMode
+      ? `${destinationName.slice(0, 32)} (Stop #${nextStopNumber})`
+      : `${geoData.city || 'Field Site'}, ${geoData.state || 'Rajasthan'}`;
 
-    if (statusBadgeX + 90 < overlayX + overlayWidth - 140) {
-      ctx.fillStyle = statusBadgeColor;
-      ctx.beginPath();
-      ctx.roundRect(statusBadgeX, textY - 14, 88, 18, 4);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.fillText(statusText, statusBadgeX + 8, textY - 1);
+    ctx.fillText(heading, textX, textY);
+
+    // Top status badge
+    let badgeText = '';
+    let badgeBg = '#2563eb';
+
+    if (isDestinationMode) {
+      badgeText = `SITE VISIT #${nextStopNumber}`;
+      badgeBg = '#0284c7';
+    } else {
+      badgeText = checkType === 'CHECK_IN' ? 'CHECK-IN' : 'CHECK-OUT';
+      badgeBg = checkType === 'CHECK_IN' ? '#16a34a' : '#dc2626';
     }
+
+    const badgeX = overlayX + overlayWidth - 140;
+    ctx.fillStyle = badgeBg;
+    ctx.beginPath();
+    ctx.roundRect(badgeX, overlayY + 12, 126, 22, 4);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText(badgeText, badgeX + 10, overlayY + 27);
 
     textY += 20;
 
-    // Detailed Street Address
-    ctx.fillStyle = '#e2e8f0';
+    // Address
+    ctx.fillStyle = '#cbd5e1';
     ctx.font = '12px sans-serif';
     const maxAddrWidth = overlayWidth - (textX - overlayX) - 20;
-    const addressLine = geoData.address || `${geoData.city}, ${geoData.state}`;
-    // Truncate or wrap to max width
-    let displayLine = addressLine;
-    if (ctx.measureText(displayLine).width > maxAddrWidth) {
-      while (ctx.measureText(displayLine + '...').width > maxAddrWidth && displayLine.length > 20) {
-        displayLine = displayLine.slice(0, -3);
+    let displayAddress = geoData.address || `${geoData.city}, ${geoData.state}`;
+    if (ctx.measureText(displayAddress).width > maxAddrWidth) {
+      while (ctx.measureText(displayAddress + '...').width > maxAddrWidth && displayAddress.length > 20) {
+        displayAddress = displayAddress.slice(0, -3);
       }
-      displayLine += '...';
+      displayAddress += '...';
     }
-    ctx.fillText(displayLine, textX, textY);
+    ctx.fillText(displayAddress, textX, textY);
     textY += 18;
 
-    // Latitude & Longitude Line
-    ctx.fillStyle = '#38bdf8'; // sky-400
+    // Coordinates
+    ctx.fillStyle = '#38bdf8';
     ctx.font = 'bold 12px monospace';
-    const coordLine = `Lat ${geoData.latitude.toFixed(6)}°  Long ${geoData.longitude.toFixed(6)}°  (±${geoData.accuracy}m)`;
-    ctx.fillText(coordLine, textX, textY);
+    ctx.fillText(
+      `Lat ${geoData.latitude.toFixed(6)}°  Long ${geoData.longitude.toFixed(6)}°`,
+      textX,
+      textY
+    );
     textY += 18;
 
-    // Timestamp
+    // Timestamp (Indian Standard Time)
     const now = new Date();
     const dateFormatted = now.toLocaleDateString('en-GB', {
       weekday: 'long',
@@ -326,35 +358,21 @@ export default function GPSMapCameraModal({
       minute: '2-digit',
       hour12: true,
     });
-    ctx.fillStyle = '#94a3b8'; // slate-400
+    ctx.fillStyle = '#94a3b8';
     ctx.font = '11px sans-serif';
     ctx.fillText(`${dateFormatted} ${timeFormatted} GMT +05:30`, textX, textY);
     textY += 16;
 
-    // Note / Field Purpose
-    ctx.fillStyle = isCheckIn ? '#34d399' : '#fbbf24'; // emerald-400 or amber-400
-    ctx.font = 'bold 11px sans-serif';
-    const cleanPurpose = purpose.replace(/_/g, ' ');
-    ctx.fillText(
-      `Note : Verified by GPS Map Camera • ${isCheckIn ? 'CHECK-IN' : 'CHECK-OUT'} • ${cleanPurpose}`,
-      textX,
-      textY
-    );
-
-    // 5. Small GPS Map Camera Badge in top-right corner of card
-    const badgeX = overlayX + overlayWidth - 150;
-    const badgeY = overlayY + 12;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.beginPath();
-    ctx.roundRect(badgeX, badgeY, 138, 22, 6);
-    ctx.fill();
-    ctx.fillStyle = isCheckIn ? '#38bdf8' : '#fb7185';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.fillText(`📷 GPS Map Camera [${isCheckIn ? 'IN' : 'OUT'}]`, badgeX + 8, badgeY + 15);
+    // Remarks / Purpose note
+    ctx.fillStyle = '#fde047';
+    ctx.font = '11px sans-serif';
+    const noteText = isDestinationMode
+      ? `Work: ${workDone.slice(0, 50)}`
+      : `Purpose: ${purpose.replace(/_/g, ' ')}${notes ? ' - ' + notes.slice(0, 30) : ''}`;
+    ctx.fillText(noteText, textX, textY);
 
     ctx.restore();
 
-    // Export image as high quality JPEG
     const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
     setCapturedPhoto(dataUrl);
     stopCamera();
@@ -372,30 +390,57 @@ export default function GPSMapCameraModal({
     setSubmitError('');
 
     try {
-      const payload = {
-        type: checkType,
-        photo: capturedPhoto,
-        latitude: geoData.latitude,
-        longitude: geoData.longitude,
-        accuracy: geoData.accuracy,
-        address: geoData.address,
-        city: geoData.city,
-        state: geoData.state,
-        country: geoData.country,
-        purpose,
-        notes,
-      };
+      if (isDestinationMode) {
+        // Submit Destination Visit
+        const payload = {
+          destinationName,
+          contactPerson,
+          contactPhone,
+          purpose,
+          workDone,
+          photo: capturedPhoto,
+          latitude: geoData.latitude,
+          longitude: geoData.longitude,
+          accuracy: geoData.accuracy,
+          address: geoData.address,
+          city: geoData.city,
+          state: geoData.state,
+        };
 
-      const res = await api.post('/field-checkins', payload);
-      if (res.data?.success) {
-        if (onSuccess) onSuccess(res.data.checkIn);
-        onClose();
+        const res = await api.post('/site-visits', payload);
+        if (res.data?.success) {
+          if (onSuccess) onSuccess(res.data.siteVisit);
+          onClose();
+        } else {
+          setSubmitError(res.data?.message || 'Failed to save site visit');
+        }
       } else {
-        setSubmitError(res.data?.message || 'Failed to submit check-in');
+        // Submit Attendance Check-In / Check-Out
+        const payload = {
+          type: checkType,
+          photo: capturedPhoto,
+          latitude: geoData.latitude,
+          longitude: geoData.longitude,
+          accuracy: geoData.accuracy,
+          address: geoData.address,
+          city: geoData.city,
+          state: geoData.state,
+          country: geoData.country,
+          purpose,
+          notes,
+        };
+
+        const res = await api.post('/field-checkins', payload);
+        if (res.data?.success) {
+          if (onSuccess) onSuccess(res.data.checkIn);
+          onClose();
+        } else {
+          setSubmitError(res.data?.message || 'Failed to submit check-in');
+        }
       }
     } catch (err) {
       console.error('Submission failed:', err);
-      setSubmitError(err.response?.data?.message || 'Server error submitting check-in');
+      setSubmitError(err.response?.data?.message || 'Network error saving record');
     } finally {
       setSubmitting(false);
     }
@@ -403,40 +448,33 @@ export default function GPSMapCameraModal({
 
   if (!isOpen) return null;
 
-  const isCheckIn = checkType === 'CHECK_IN';
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
-        {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
-          <div className="flex items-center gap-2.5">
-            <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center text-white ${
-                isCheckIn ? 'bg-emerald-600' : 'bg-rose-600'
-              } shadow-sm`}
-            >
-              {isCheckIn ? <LogIn className="w-5 h-5" /> : <LogOut className="w-5 h-5" />}
-            </div>
-            <div>
-              <h3 className="font-bold text-slate-900 text-sm">
-                GPS Map Camera & Geolocation Attendance
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                Official Geotagged Watermark with Real-Time Coordinates
-              </p>
-            </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+        {/* Header */}
+        <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+          <div>
+            <h3 className="font-bold text-slate-900 text-sm">
+              {isDestinationMode
+                ? `Add Site / Client Destination Visit (Stop #${nextStopNumber})`
+                : 'Daily Attendance Photo Verification'}
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              {isDestinationMode
+                ? 'Record your arrival at a client site or project destination'
+                : 'Mark your arrival or departure for the workday'}
+            </p>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
+            className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Modal Body */}
+        {/* Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
           {submitError && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
@@ -445,52 +483,140 @@ export default function GPSMapCameraModal({
             </div>
           )}
 
-          {/* CHECK-IN vs CHECK-OUT Selector Tabs */}
-          <div className="bg-slate-100 p-1 rounded-2xl flex items-center gap-1 border border-slate-200/80">
-            <button
-              type="button"
-              onClick={() => {
-                setCheckType('CHECK_IN');
-                setPurpose('CLIENT_VISIT');
-              }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                checkType === 'CHECK_IN'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <LogIn className="w-4 h-4" />
-              <span>Check-In (Arrival / Duty Start)</span>
-            </button>
+          {/* Mode Switch or Attendance Selector */}
+          {!isDestinationMode ? (
+            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => {
+                  setCheckType('CHECK_IN');
+                  setPurpose('CLIENT_VISIT');
+                }}
+                className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  checkType === 'CHECK_IN'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Mark Check-In (Arrival)</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setCheckType('CHECK_OUT');
-                setPurpose('SHIFT_END');
-              }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                checkType === 'CHECK_OUT'
-                  ? 'bg-rose-600 text-white shadow-md shadow-rose-600/25'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Check-Out (Departure / Duty End)</span>
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCheckType('CHECK_OUT');
+                  setPurpose('SHIFT_END');
+                }}
+                className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  checkType === 'CHECK_OUT'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Mark Check-Out (Departure)</span>
+              </button>
+            </div>
+          ) : (
+            /* Destination Specific Fields */
+            <div className="space-y-3 p-3.5 bg-sky-50/60 rounded-xl border border-sky-100 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-800 mb-1">
+                  Destination / Client Site Name *
+                </label>
+                <div className="relative">
+                  <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="e.g. Apex Hospital Site, Sharma Trading Co., Branch 2..."
+                    value={destinationName}
+                    onChange={(e) => setDestinationName(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-blue-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">
+                    Contact Person (Optional)
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="e.g. Mr. Rajesh Verma"
+                      value={contactPerson}
+                      onChange={(e) => setContactPerson(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-blue-600"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">
+                    Contact Phone (Optional)
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="e.g. +91 98290 12345"
+                      value={contactPhone}
+                      onChange={(e) => setContactPhone(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-blue-600"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">Visit Purpose *</label>
+                  <select
+                    value={purpose}
+                    onChange={(e) => setPurpose(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 font-medium focus:outline-none focus:border-blue-600"
+                  >
+                    <option value="CLIENT_MEETING">Client Meeting / Discussion</option>
+                    <option value="SITE_INSPECTION">Site Inspection / Survey</option>
+                    <option value="DELIVERY">Delivery of Material / Documents</option>
+                    <option value="PAYMENT_COLLECTION">Payment Collection / Follow-up</option>
+                    <option value="MAINTENANCE">Technical Support / Repair</option>
+                    <option value="SITE_SURVEY">Pre-Project Site Survey</option>
+                    <option value="OTHER">Other Site Work</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">
+                    Work Summary / What was done? *
+                  </label>
+                  <div className="relative">
+                    <FileText className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="e.g. Completed inspection, signed approval form..."
+                      value={workDone}
+                      onChange={(e) => setWorkDone(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-blue-600"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Camera Viewport or Captured Stamped Preview */}
-          <div className="relative aspect-video w-full bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center">
+          <div className="relative aspect-video w-full bg-slate-900 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
             {capturedPhoto ? (
-              // Captured Stamped Photo Preview
               <img
                 src={capturedPhoto}
-                alt="GPS Stamped Field Verification"
+                alt="Stamped Verification"
                 className="w-full h-full object-cover"
               />
             ) : (
-              // Live Video Stream
               <>
                 <video
                   ref={videoRef}
@@ -500,8 +626,8 @@ export default function GPSMapCameraModal({
                   className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
                 />
                 {cameraError && (
-                  <div className="absolute inset-0 bg-slate-950/80 flex flex-col items-center justify-center p-6 text-center">
-                    <AlertCircle className="w-10 h-10 text-rose-500 mb-2" />
+                  <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center p-6 text-center">
+                    <AlertCircle className="w-8 h-8 text-rose-500 mb-2" />
                     <p className="text-xs text-slate-200 max-w-sm mb-3">{cameraError}</p>
                     <button
                       onClick={() => startCamera(facingMode)}
@@ -512,113 +638,94 @@ export default function GPSMapCameraModal({
                   </div>
                 )}
 
-                {/* Live GPS status pill overlay on camera */}
-                <div className="absolute top-3 left-3 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20 text-white text-[11px] font-semibold flex items-center gap-2 shadow-lg">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      isCheckIn ? 'bg-emerald-500' : 'bg-rose-500'
-                    } animate-pulse`}
-                  ></span>
-                  <span className="font-bold">
-                    {isCheckIn ? 'CHECK-IN' : 'CHECK-OUT'}:
-                  </span>
+                {/* Status indicator on camera */}
+                <div className="absolute top-3 left-3 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-700 text-white text-[11px] font-medium flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                   {locationLoading ? (
-                    <span className="text-slate-300">Acquiring GPS fix...</span>
+                    <span className="text-slate-300">Getting location...</span>
                   ) : (
                     <span>
-                      {geoData.city || 'GPS Active'} • {geoData.latitude.toFixed(4)}°,{' '}
-                      {geoData.longitude.toFixed(4)}°
+                      {geoData.city || 'GPS'} • {geoData.latitude.toFixed(4)}°, {geoData.longitude.toFixed(4)}°
                     </span>
                   )}
                 </div>
 
-                {/* Flip camera button */}
+                {/* Flip camera */}
                 <button
                   type="button"
                   onClick={toggleCamera}
-                  title="Switch Camera (Front / Back)"
-                  className="absolute top-3 right-3 p-2 bg-slate-900/70 hover:bg-slate-900 text-white rounded-full backdrop-blur-md border border-white/20 shadow-md transition-all cursor-pointer"
+                  title="Switch Camera"
+                  className="absolute top-3 right-3 p-2 bg-slate-900/70 hover:bg-slate-900 text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
                 >
                   <FlipHorizontal className="w-4 h-4" />
                 </button>
               </>
             )}
 
-            {/* Hidden Canvas used for image processing & watermark generation */}
             <canvas ref={canvasRef} className="hidden" />
           </div>
 
-          {/* Form details (Purpose & Notes) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                {isCheckIn ? 'Check-In Purpose *' : 'Check-Out Reason / Summary *'}
-              </label>
-              <select
-                value={purpose}
-                onChange={(e) => setPurpose(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              >
-                {isCheckIn ? (
-                  <>
-                    <option value="CLIENT_VISIT">Client Site Visit</option>
-                    <option value="SITE_INSPECTION">Site Inspection / Survey</option>
-                    <option value="SHIFT_START">Regular Shift Reporting</option>
-                    <option value="OFFICE_COMMUTE">Commute / Travel Arrival</option>
-                    <option value="OFFSITE_MEETING">Offsite Team Meeting</option>
-                    <option value="DELIVERY">Delivery Pickup / Dispatch</option>
-                    <option value="MARKETING">Marketing Campaign / Roadshow</option>
-                    <option value="MAINTENANCE">Technical Support / Maintenance</option>
-                    <option value="OTHER">Other Field Work</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="SHIFT_END">End of Shift / Duty Departure</option>
-                    <option value="CLIENT_VISIT">Completed Client Meeting</option>
-                    <option value="SITE_INSPECTION">Finished Site Inspection</option>
-                    <option value="DELIVERY">Delivery Completed</option>
-                    <option value="OFFICE_COMMUTE">Commute Home / Departure</option>
-                    <option value="OTHER">Other Work Completion</option>
-                  </>
-                )}
-              </select>
-            </div>
+          {/* Attendance specific purpose & notes */}
+          {!isDestinationMode && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {checkType === 'CHECK_IN' ? 'Check-In Purpose' : 'Check-Out Reason'}
+                </label>
+                <select
+                  value={purpose}
+                  onChange={(e) => setPurpose(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium focus:outline-none focus:border-blue-600"
+                >
+                  {checkType === 'CHECK_IN' ? (
+                    <>
+                      <option value="CLIENT_VISIT">Client Site Visit</option>
+                      <option value="SITE_INSPECTION">Site Inspection</option>
+                      <option value="SHIFT_START">Regular Work Start</option>
+                      <option value="OFFICE_COMMUTE">Commute Arrival</option>
+                      <option value="OTHER">Other Work</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="SHIFT_END">End of Day Work</option>
+                      <option value="CLIENT_VISIT">Client Visit Completed</option>
+                      <option value="OFFICE_COMMUTE">Leaving Office / Field</option>
+                      <option value="OTHER">Other Departure</option>
+                    </>
+                  )}
+                </select>
+              </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Optional Notes / Remarks
-              </label>
-              <input
-                type="text"
-                placeholder={
-                  isCheckIn
-                    ? 'e.g. Arrived at client office...'
-                    : 'e.g. Meeting finished, deliverables handed over...'
-                }
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              />
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Remarks (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Arrived at client office..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-600"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Geolocation info summary card */}
-          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs flex items-start gap-3">
+          {/* Current location card */}
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs flex items-start gap-2.5">
             <MapPin className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
             <div className="flex-1">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-900">
-                  {geoData.city || 'Detected Location'}, {geoData.state || ''}
+                <span className="font-semibold text-slate-900">
+                  {geoData.city || 'Detected Location'}
                 </span>
-                <span className="text-[10px] text-slate-400 font-mono">
+                <span className="text-[10px] text-slate-500 font-mono">
                   {geoData.latitude.toFixed(6)}°, {geoData.longitude.toFixed(6)}°
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{geoData.address}</p>
+              <p className="text-[11px] text-slate-600 mt-0.5">{geoData.address}</p>
             </div>
             <button
               onClick={fetchLocation}
-              title="Refresh GPS Coordinates"
+              title="Refresh Location"
               disabled={locationLoading}
               className="text-slate-400 hover:text-blue-600 p-1 cursor-pointer"
             >
@@ -627,12 +734,12 @@ export default function GPSMapCameraModal({
           </div>
         </div>
 
-        {/* Modal Footer Controls */}
-        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3">
+        {/* Footer */}
+        <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-xl text-xs font-semibold cursor-pointer"
+            className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg text-xs font-semibold cursor-pointer"
           >
             Cancel
           </button>
@@ -643,7 +750,7 @@ export default function GPSMapCameraModal({
                 <button
                   type="button"
                   onClick={handleRetake}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-semibold cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" /> Retake
                 </button>
@@ -651,22 +758,28 @@ export default function GPSMapCameraModal({
                   type="button"
                   onClick={handleSubmit}
                   disabled={submitting}
-                  className={`inline-flex items-center gap-1.5 px-5 py-2.5 ${
-                    isCheckIn
-                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
-                      : 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20'
-                  } text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50 cursor-pointer`}
+                  className={`inline-flex items-center gap-1.5 px-5 py-2 ${
+                    isDestinationMode
+                      ? 'bg-blue-600 hover:bg-blue-700'
+                      : checkType === 'CHECK_IN'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-rose-600 hover:bg-rose-700'
+                  } text-white rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer`}
                 >
                   {submitting ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Verifying & Recording...</span>
+                      <span>Saving...</span>
                     </>
                   ) : (
                     <>
                       <CheckCircle2 className="w-4 h-4" />
                       <span>
-                        {isCheckIn ? 'Confirm & Punch Check-In' : 'Confirm & Punch Check-Out'}
+                        {isDestinationMode
+                          ? `Save Stop #${nextStopNumber} Visit`
+                          : checkType === 'CHECK_IN'
+                          ? 'Confirm Check-In'
+                          : 'Confirm Check-Out'}
                       </span>
                     </>
                   )}
@@ -677,14 +790,20 @@ export default function GPSMapCameraModal({
                 type="button"
                 onClick={captureAndStamp}
                 disabled={!cameraActive}
-                className={`inline-flex items-center gap-2 px-6 py-2.5 ${
-                  isCheckIn
-                    ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
-                    : 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20'
-                } text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50 cursor-pointer`}
+                className={`inline-flex items-center gap-2 px-5 py-2 ${
+                  isDestinationMode
+                    ? 'bg-blue-600 hover:bg-blue-700'
+                    : checkType === 'CHECK_IN'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-rose-600 hover:bg-rose-700'
+                } text-white rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer`}
               >
                 <Camera className="w-4 h-4" />
-                <span>Take {isCheckIn ? 'Check-In' : 'Check-Out'} Selfie</span>
+                <span>
+                  {isDestinationMode
+                    ? `Capture Stop #${nextStopNumber} Photo`
+                    : `Capture ${checkType === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} Photo`}
+                </span>
               </button>
             )}
           </div>

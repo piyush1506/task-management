@@ -15,78 +15,85 @@ import {
   Filter,
   Eye,
   X,
-  Layers,
   LogIn,
   LogOut,
-  Timer,
+  Building2,
+  Navigation,
+  User,
+  Phone,
+  FileText,
+  Plus,
+  Route,
   CheckCircle2,
-  AlertTriangle,
 } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Pin icons for Leaflet (Check-In: Green, Check-Out: Rose)
-const createMarkerIcon = (type) => {
-  const isCheckIn = type === 'CHECK_IN';
-  const color = isCheckIn ? '#10b981' : '#f43f5e';
+// Pin icons
+const createIcon = (type, number) => {
+  let bg = '#2563eb';
+  let text = `${number || ''}`;
+
+  if (type === 'CHECK_IN') {
+    bg = '#16a34a';
+    text = 'IN';
+  } else if (type === 'CHECK_OUT') {
+    bg = '#dc2626';
+    text = 'OUT';
+  } else {
+    bg = '#0284c7';
+    text = `#${number || 1}`;
+  }
+
   return L.divIcon({
     className: 'custom-pin',
     html: `
-      <div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;background:${color};border:3px solid #ffffff;border-radius:50%;box-shadow:0 4px 12px ${
-        isCheckIn ? 'rgba(16,185,129,0.5)' : 'rgba(244,63,94,0.5)'
-      };">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
-          <circle cx="12" cy="10" r="3"></circle>
-        </svg>
+      <div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:${bg};color:#ffffff;font-size:11px;font-weight:bold;border:2.5px solid #ffffff;border-radius:50%;box-shadow:0 3px 8px rgba(0,0,0,0.3);">
+        ${text}
       </div>
     `,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
-    popupAnchor: [0, -20],
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    popupAnchor: [0, -18],
   });
 };
 
 export default function EmployeeFieldCheckInPage() {
-  const [checkIns, setCheckIns] = useState([]);
+  const [activeTab, setActiveTab] = useState('ROUTE'); // 'ROUTE' | 'HISTORY'
+
+  // Data states
   const [statusData, setStatusData] = useState({
     currentStatus: 'NOT_CHECKED_IN',
-    todaySummary: {
-      firstCheckIn: null,
-      lastCheckOut: null,
-      totalWorkMinutes: 0,
-      recordsCount: 0,
-    },
-    lastRecord: null,
+    todaySummary: { firstCheckIn: null, lastCheckOut: null, totalWorkMinutes: 0 },
   });
+  const [dailyRoute, setDailyRoute] = useState({ itinerary: [], stopsCount: 0 });
+  const [checkIns, setCheckIns] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Modal State
+  // Modal controls
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalType, setModalType] = useState('CHECK_IN');
+  const [modalMode, setModalMode] = useState('ATTENDANCE'); // 'ATTENDANCE' | 'DESTINATION'
+  const [attendanceType, setAttendanceType] = useState('CHECK_IN');
 
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [filterType, setFilterType] = useState('ALL');
-  const [filterPurpose, setFilterPurpose] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [resHistory, resStatus] = await Promise.all([
-        api.get('/field-checkins/my'),
+      const [resStatus, resRoute, resHistory] = await Promise.all([
         api.get('/field-checkins/status'),
+        api.get('/site-visits/daily-route'),
+        api.get('/field-checkins/my?limit=50'),
       ]);
 
-      if (resHistory.data?.success) {
-        setCheckIns(resHistory.data.checkIns || []);
-      }
-      if (resStatus.data?.success) {
-        setStatusData(resStatus.data);
-      }
+      if (resStatus.data?.success) setStatusData(resStatus.data);
+      if (resRoute.data?.success) setDailyRoute(resRoute.data);
+      if (resHistory.data?.success) setCheckIns(resHistory.data.checkIns || []);
     } catch (err) {
-      console.error('Failed to load check-ins or status:', err);
+      console.error('Failed to load field data:', err);
     } finally {
       setLoading(false);
     }
@@ -96,594 +103,536 @@ export default function EmployeeFieldCheckInPage() {
     fetchData();
   }, []);
 
-  const handleSuccess = (newRecord) => {
-    setCheckIns((prev) => [newRecord, ...prev]);
-    // Refresh live status summary
-    api.get('/field-checkins/status').then((res) => {
-      if (res.data?.success) setStatusData(res.data);
-    });
+  const handleModalSuccess = () => {
+    fetchData();
   };
 
-  const openPunchModal = (type) => {
-    setModalType(type);
+  const openAttendanceModal = (type) => {
+    setModalMode('ATTENDANCE');
+    setAttendanceType(type);
     setModalOpen(true);
   };
 
-  // Filtered records
-  const filteredCheckIns = checkIns.filter((item) => {
-    const matchesType = filterType === 'ALL' || item.type === filterType;
-    const matchesPurpose = filterPurpose === 'ALL' || item.purpose === filterPurpose;
-    const matchesSearch =
-      (item.address && item.address.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (item.city && item.city.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (item.notes && item.notes.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesType && matchesPurpose && matchesSearch;
-  });
-
-  // Calculate live hours
-  const totalMinutes = statusData.todaySummary?.totalWorkMinutes || 0;
-  const hours = Math.floor(totalMinutes / 60);
-  const mins = totalMinutes % 60;
-  const timeFormatted = `${hours}h ${mins}m`;
-
-  const lastCheckIn = checkIns[0] || null;
-  const mapCenter = lastCheckIn
-    ? [lastCheckIn.latitude, lastCheckIn.longitude]
-    : [25.351463, 74.632922];
-
-  const getPurposeBadge = (purpose) => {
-    const styles = {
-      CLIENT_VISIT: 'bg-blue-100 text-blue-700 border-blue-200',
-      SITE_INSPECTION: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-      DELIVERY: 'bg-amber-100 text-amber-700 border-amber-200',
-      MARKETING: 'bg-purple-100 text-purple-700 border-purple-200',
-      MAINTENANCE: 'bg-rose-100 text-rose-700 border-rose-200',
-      SHIFT_START: 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold',
-      SHIFT_END: 'bg-rose-100 text-rose-800 border-rose-300 font-bold',
-      OFFICE_COMMUTE: 'bg-sky-100 text-sky-700 border-sky-200',
-      OTHER: 'bg-slate-100 text-slate-700 border-slate-200',
-    };
-    const label = (purpose || 'OTHER').replace(/_/g, ' ');
-    return (
-      <span
-        className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-          styles[purpose] || styles.OTHER
-        }`}
-      >
-        {label}
-      </span>
-    );
+  const openDestinationModal = () => {
+    setModalMode('DESTINATION');
+    setModalOpen(true);
   };
 
-  const isCurrentlyCheckedIn = statusData.currentStatus === 'CHECKED_IN';
-  const isCurrentlyCheckedOut = statusData.currentStatus === 'CHECKED_OUT';
+  // Map route points
+  const routePoints = dailyRoute.itinerary
+    .filter((pt) => pt.latitude && pt.longitude)
+    .map((pt) => [pt.latitude, pt.longitude]);
+
+  const mapCenter =
+    routePoints.length > 0 ? routePoints[routePoints.length - 1] : [25.351463, 74.632922];
+
+  const isCheckedIn = statusData.currentStatus === 'CHECKED_IN';
+  const isCheckedOut = statusData.currentStatus === 'CHECKED_OUT';
+
+  const totalMin = statusData.todaySummary?.totalWorkMinutes || 0;
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+
+  // Filtered history
+  const filteredHistory = checkIns.filter((c) => {
+    const matchesType = filterType === 'ALL' || c.type === filterType;
+    const matchesSearch =
+      !searchTerm ||
+      c.address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.city?.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesType && matchesSearch;
+  });
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Quick Check-in/Check-out Control */}
-      <div className="bg-white p-6 rounded-3xl shadow-xs border border-slate-200/80">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-emerald-600 font-semibold text-xs tracking-wider uppercase">
-              <Compass className="w-4 h-4" />
-              <span>Field Duty & Geolocation Attendance</span>
+      {/* Top Header Card */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+          <div>
+            <div className="flex items-center gap-2 text-blue-600 font-semibold text-xs tracking-wider uppercase mb-1">
+              <Navigation className="w-4 h-4" />
+              <span>Field Staff Portal</span>
             </div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              GPS Map Camera Check-In & Check-Out
+              Daily Attendance & Site Destinations
             </h1>
-            <p className="text-xs text-slate-500 max-w-xl">
-              Take verified live selfies with authenticated coordinates, mini-map, address, and
-              timestamp whenever reporting for or departing from client visits and field work.
+            <p className="text-xs text-slate-600 mt-0.5">
+              Punch your daily check-in/out and log client visits and project site stops with photos
+              and verified GPS coordinates.
             </p>
           </div>
 
-          {/* Quick Action Buttons */}
-          <div className="flex items-center gap-3">
+          {/* Quick Actions */}
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
-              onClick={() => openPunchModal('CHECK_IN')}
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-2xl font-bold text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+              onClick={() => openAttendanceModal('CHECK_IN')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
-              <span>Punch Check-In</span>
+              <span>Mark Check-In</span>
             </button>
 
             <button
-              onClick={() => openPunchModal('CHECK_OUT')}
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-rose-600 hover:bg-rose-700 active:scale-98 text-white rounded-2xl font-bold text-xs shadow-md shadow-rose-500/20 transition-all cursor-pointer"
+              onClick={openDestinationModal}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Destination Visit</span>
+            </button>
+
+            <button
+              onClick={() => openAttendanceModal('CHECK_OUT')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
-              <span>Punch Check-Out</span>
+              <span>Mark Check-Out</span>
             </button>
           </div>
         </div>
 
-        {/* Live Attendance Status Strip */}
-        <div className="mt-6 pt-5 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Current Live Status */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3.5">
-            <div
-              className={`w-11 h-11 rounded-xl flex items-center justify-center text-white shrink-0 ${
-                isCurrentlyCheckedIn
-                  ? 'bg-emerald-500 shadow-md shadow-emerald-500/25'
-                  : isCurrentlyCheckedOut
-                  ? 'bg-rose-500 shadow-md shadow-rose-500/25'
-                  : 'bg-slate-400'
-              }`}
-            >
-              {isCurrentlyCheckedIn ? (
-                <LogIn className="w-5 h-5" />
-              ) : isCurrentlyCheckedOut ? (
-                <LogOut className="w-5 h-5" />
-              ) : (
-                <Clock className="w-5 h-5" />
-              )}
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-                Duty Status
-              </p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    isCurrentlyCheckedIn
-                      ? 'bg-emerald-500 animate-pulse'
-                      : isCurrentlyCheckedOut
-                      ? 'bg-rose-500'
-                      : 'bg-slate-400'
-                  }`}
-                ></span>
-                <span className="text-sm font-bold text-slate-900">
-                  {isCurrentlyCheckedIn
-                    ? 'Currently Checked In'
-                    : isCurrentlyCheckedOut
-                    ? 'Checked Out'
-                    : 'Not Checked In Today'}
-                </span>
-              </div>
+        {/* Status bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-100 text-xs">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="text-slate-500 font-medium block text-[11px]">Today's Status</span>
+            <div className="flex items-center gap-1.5 mt-1">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isCheckedIn ? 'bg-emerald-500' : isCheckedOut ? 'bg-rose-500' : 'bg-slate-400'
+                }`}
+              ></span>
+              <span className="font-bold text-slate-900">
+                {isCheckedIn ? 'Checked In' : isCheckedOut ? 'Checked Out' : 'Not Checked In'}
+              </span>
             </div>
           </div>
 
-          {/* First Check-In Time */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-              <LogIn className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-                Today's Check-In
-              </p>
-              <p className="text-sm font-bold text-slate-900 mt-0.5">
-                {statusData.todaySummary?.firstCheckIn
-                  ? new Date(
-                      statusData.todaySummary.firstCheckIn.timestamp
-                    ).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: true,
-                    })
-                  : '--:--'}
-              </p>
-            </div>
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="text-slate-500 font-medium block text-[11px]">Sites Visited Today</span>
+            <p className="font-bold text-slate-900 mt-1">
+              {dailyRoute.stopsCount} Destination{dailyRoute.stopsCount === 1 ? '' : 's'}
+            </p>
           </div>
 
-          {/* Last Check-Out Time */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-              <LogOut className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-                Today's Check-Out
-              </p>
-              <p className="text-sm font-bold text-slate-900 mt-0.5">
-                {statusData.todaySummary?.lastCheckOut
-                  ? new Date(
-                      statusData.todaySummary.lastCheckOut.timestamp
-                    ).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: true,
-                    })
-                  : '--:--'}
-              </p>
-            </div>
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="text-slate-500 font-medium block text-[11px]">Check-In Time</span>
+            <p className="font-bold text-slate-900 mt-1">
+              {statusData.todaySummary?.firstCheckIn
+                ? new Date(statusData.todaySummary.firstCheckIn.timestamp).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true,
+                  })
+                : '--:--'}
+            </p>
           </div>
 
-          {/* Estimated Duty Hours */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
-              <Timer className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-                Working Time Today
-              </p>
-              <p className="text-sm font-bold text-slate-900 mt-0.5">
-                {statusData.todaySummary?.firstCheckIn ? timeFormatted : '0h 0m'}
-              </p>
-            </div>
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="text-slate-500 font-medium block text-[11px]">Hours Logged Today</span>
+            <p className="font-bold text-slate-900 mt-1">
+              {statusData.todaySummary?.firstCheckIn ? `${hours}h ${mins}m` : '0h 0m'}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Live Map Overview */}
-      {checkIns.length > 0 && (
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-emerald-600" />
-              <h2 className="font-bold text-slate-900 text-sm">
-                My Attendance & Field Geolocation Map ({checkIns.length} Pins)
-              </h2>
-            </div>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1.5 text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Check-In
+      {/* Tabs navigation */}
+      <div className="flex items-center justify-between border-b border-slate-200">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveTab('ROUTE')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'ROUTE'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Route className="w-4 h-4" />
+            <span>Today's Travel Route & Destinations ({dailyRoute.itinerary.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('HISTORY')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'HISTORY'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            <span>Attendance Check-In History</span>
+          </button>
+        </div>
+
+        <button
+          onClick={fetchData}
+          className="text-slate-500 hover:text-slate-800 p-1.5 transition-colors cursor-pointer"
+          title="Refresh"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />
+        </button>
+      </div>
+
+      {/* TAB 1: Today's Travel Route & Destination Stops */}
+      {activeTab === 'ROUTE' && (
+        <div className="space-y-6">
+          {/* Daily Travel Map */}
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-blue-600" />
+                <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wide">
+                  Today's Field Route Map
+                </h3>
+              </div>
+              <span className="text-[11px] text-slate-500">
+                Connected route between check-in, site visits, and check-out
               </span>
-              <span className="flex items-center gap-1.5 text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Check-Out
-              </span>
             </div>
-          </div>
-          <div className="h-80 w-full relative z-0">
-            <MapContainer
-              center={mapCenter}
-              zoom={13}
-              scrollWheelZoom={false}
-              style={{ height: '100%', width: '100%' }}
-            >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              {checkIns.map((ci) => {
-                const isCi = ci.type === 'CHECK_IN';
-                return (
+
+            <div className="h-80 w-full relative z-0">
+              <MapContainer
+                center={mapCenter}
+                zoom={13}
+                scrollWheelZoom={false}
+                style={{ height: '100%', width: '100%' }}
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+
+                {/* Polyline connecting stops */}
+                {routePoints.length > 1 && (
+                  <Polyline positions={routePoints} color="#2563eb" weight={4} dashArray="6, 8" />
+                )}
+
+                {dailyRoute.itinerary.map((item, idx) => (
                   <Marker
-                    key={ci._id}
-                    position={[ci.latitude, ci.longitude]}
-                    icon={createMarkerIcon(ci.type)}
+                    key={item.id || idx}
+                    position={[item.latitude, item.longitude]}
+                    icon={createIcon(item.type, item.stopNumber || idx + 1)}
                   >
                     <Popup>
-                      <div className="p-1 space-y-1.5 text-xs max-w-xs">
-                        {ci.photo && (
+                      <div className="p-1 space-y-1 text-xs max-w-xs">
+                        {item.photo && (
                           <img
-                            src={ci.photo}
-                            alt="Selfie"
-                            className="w-full h-28 object-cover rounded-md mb-1 cursor-pointer"
-                            onClick={() => setSelectedPhoto(ci.photo)}
+                            src={item.photo}
+                            alt="Site visit"
+                            className="w-full h-24 object-cover rounded mb-1 cursor-pointer"
+                            onClick={() => setSelectedPhoto(item.photo)}
                           />
                         )}
-                        <div className="flex items-center justify-between">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              isCi
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-rose-100 text-rose-700'
-                            }`}
-                          >
-                            {isCi ? '● CHECK-IN' : '● CHECK-OUT'}
+                        <p className="font-bold text-slate-900">{item.title}</p>
+                        <p className="text-slate-600 text-[11px]">{item.address}</p>
+                        {item.workDone && (
+                          <p className="text-slate-700 bg-slate-50 p-1 rounded text-[11px]">
+                            <strong>Work:</strong> {item.workDone}
+                          </p>
+                        )}
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px] text-slate-500">
+                          <span>
+                            {new Date(item.timestamp).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: true,
+                            })}
                           </span>
-                          <span className="text-slate-500 text-[10px]">
-                            {new Date(ci.timestamp).toLocaleTimeString([], {
+                          <a
+                            href={`https://www.google.com/maps?q=${item.latitude},${item.longitude}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            Open Maps
+                          </a>
+                        </div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
+              </MapContainer>
+            </div>
+          </div>
+
+          {/* Stops Timeline & Cards */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm">Today's Stop Itinerary</h3>
+                <p className="text-xs text-slate-500">
+                  Chronological record of duty check-in, site visits, and departure.
+                </p>
+              </div>
+
+              <button
+                onClick={openDestinationModal}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs rounded-lg transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Next Stop</span>
+              </button>
+            </div>
+
+            {dailyRoute.itinerary.length === 0 ? (
+              <div className="py-12 text-center">
+                <Building2 className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-xs text-slate-600 font-semibold">No stops logged today yet</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 mb-3">
+                  Start by marking your check-in or logging your first client site destination.
+                </p>
+                <button
+                  onClick={openDestinationModal}
+                  className="px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  Log First Destination
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {dailyRoute.itinerary.map((item, idx) => {
+                  const isAttendance = item.kind === 'ATTENDANCE';
+                  const isCheckIn = item.type === 'CHECK_IN';
+
+                  return (
+                    <div
+                      key={item.id || idx}
+                      className="p-4 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-start gap-4"
+                    >
+                      {/* Photo Thumbnail */}
+                      {item.photo ? (
+                        <div
+                          className="w-20 h-20 rounded-lg overflow-hidden border border-slate-200 shrink-0 cursor-pointer group relative"
+                          onClick={() => setSelectedPhoto(item.photo)}
+                        >
+                          <img
+                            src={item.photo}
+                            alt="Stop"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white">
+                            <Eye className="w-4 h-4" />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="w-20 h-20 rounded-lg bg-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                          <Camera className="w-5 h-5" />
+                        </div>
+                      )}
+
+                      {/* Content */}
+                      <div className="flex-1 space-y-1 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isAttendance
+                                  ? isCheckIn
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-rose-100 text-rose-800'
+                                  : 'bg-sky-100 text-sky-800'
+                              }`}
+                            >
+                              {isAttendance ? item.type : `STOP #${item.stopNumber}`}
+                            </span>
+                            <h4 className="font-bold text-slate-900 text-sm">
+                              {item.destinationName || item.title}
+                            </h4>
+                          </div>
+
+                          <span className="text-[11px] font-medium text-slate-500">
+                            {new Date(item.timestamp).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
                               hour12: true,
                             })}
                           </span>
                         </div>
-                        <p className="font-bold text-slate-900">{ci.city || 'Field Site'}</p>
-                        <p className="text-slate-600 line-clamp-2">{ci.address}</p>
-                        <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                          <span className="text-slate-400 text-[10px]">
-                            {new Date(ci.timestamp).toLocaleDateString()}
-                          </span>
-                          <a
-                            href={`https://www.google.com/maps?q=${ci.latitude},${ci.longitude}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 hover:underline inline-flex items-center gap-1 text-[10px]"
-                          >
-                            Google Maps <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </div>
+
+                        <p className="text-slate-600 flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{item.address || item.subtitle}</span>
+                        </p>
+
+                        {item.contactPerson && (
+                          <p className="text-slate-500 text-[11px]">
+                            Contact: <strong>{item.contactPerson}</strong>{' '}
+                            {item.contactPhone && `(${item.contactPhone})`}
+                          </p>
+                        )}
+
+                        {item.workDone && (
+                          <div className="mt-1 p-2 bg-white rounded border border-slate-200 text-slate-800 text-[11px]">
+                            <strong>Work Completed:</strong> {item.workDone}
+                          </div>
+                        )}
+
+                        {item.notes && (
+                          <p className="text-slate-500 text-[11px] italic">"{item.notes}"</p>
+                        )}
                       </div>
-                    </Popup>
-                  </Marker>
-                );
-              })}
-            </MapContainer>
+
+                      {/* Actions */}
+                      <div className="shrink-0 flex items-center gap-2 self-end sm:self-center">
+                        <a
+                          href={`https://www.google.com/maps?q=${item.latitude},${item.longitude}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1.5 border border-slate-300 hover:bg-white text-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Maps</span>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* History Table & Filter Bar */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table header & controls */}
-        <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div>
-            <h2 className="font-bold text-slate-900 text-base">
-              Punch History & Geotagged Records
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Verified selfie logs with GPS coordinates, mini-map overlay, and timestamps.
-            </p>
-          </div>
+      {/* TAB 2: Check-In / Check-Out Attendance History */}
+      {activeTab === 'HISTORY' && (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+          <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h3 className="font-bold text-slate-900 text-sm">Attendance Logs</h3>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Search */}
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <div className="flex items-center gap-2">
               <input
                 type="text"
                 placeholder="Search address or city..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-emerald-500 w-44 sm:w-48"
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-blue-600"
               />
-            </div>
 
-            {/* Type Filter (Check-In vs Check-Out) */}
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-semibold focus:outline-none focus:border-emerald-500"
-            >
-              <option value="ALL">All Punches</option>
-              <option value="CHECK_IN">🟢 Check-Ins Only</option>
-              <option value="CHECK_OUT">🔴 Check-Outs Only</option>
-            </select>
-
-            {/* Purpose Filter */}
-            <select
-              value={filterPurpose}
-              onChange={(e) => setFilterPurpose(e.target.value)}
-              className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:border-emerald-500"
-            >
-              <option value="ALL">All Purposes</option>
-              <option value="CLIENT_VISIT">Client Visit</option>
-              <option value="SITE_INSPECTION">Site Inspection</option>
-              <option value="SHIFT_START">Shift Start</option>
-              <option value="SHIFT_END">Shift End</option>
-              <option value="DELIVERY">Delivery</option>
-              <option value="MARKETING">Marketing</option>
-              <option value="MAINTENANCE">Maintenance</option>
-              <option value="OTHER">Other</option>
-            </select>
-
-            <button
-              onClick={fetchData}
-              className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-              title="Refresh Records"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        {loading ? (
-          <div className="py-16 text-center">
-            <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-            <p className="text-xs text-slate-500">Loading verified field records...</p>
-          </div>
-        ) : filteredCheckIns.length === 0 ? (
-          <div className="py-16 text-center px-4">
-            <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 mx-auto mb-3">
-              <Camera className="w-7 h-7" />
-            </div>
-            <h3 className="font-bold text-slate-800 text-sm">No Attendance Records Found</h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
-              {searchTerm || filterType !== 'ALL' || filterPurpose !== 'ALL'
-                ? 'No records match your active search or filter selection.'
-                : 'You have not submitted any GPS check-in or check-out selfies yet.'}
-            </p>
-            <div className="flex items-center justify-center gap-3">
-              <button
-                onClick={() => openPunchModal('CHECK_IN')}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 transition-colors cursor-pointer"
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-none focus:border-blue-600"
               >
-                Punch First Check-In
-              </button>
+                <option value="ALL">All Records</option>
+                <option value="CHECK_IN">Check-Ins</option>
+                <option value="CHECK_OUT">Check-Outs</option>
+              </select>
             </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  <th className="py-3 px-4">Type</th>
-                  <th className="py-3 px-4">Stamped Photo</th>
-                  <th className="py-3 px-4">Date & Time</th>
-                  <th className="py-3 px-4">Purpose</th>
-                  <th className="py-3 px-4">Location & Address</th>
-                  <th className="py-3 px-4">GPS Coordinates</th>
-                  <th className="py-3 px-4">Notes</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {filteredCheckIns.map((item) => {
-                  const isCi = item.type === 'CHECK_IN';
-                  return (
-                    <tr key={item._id} className="hover:bg-slate-50/80 transition-colors">
-                      {/* Type Badge */}
-                      <td className="py-3 px-4 whitespace-nowrap">
+
+          {filteredHistory.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-500">
+              No attendance records found.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50 text-slate-600 font-semibold text-[11px] uppercase">
+                    <th className="py-2.5 px-4">Type</th>
+                    <th className="py-2.5 px-4">Photo</th>
+                    <th className="py-2.5 px-4">Date & Time</th>
+                    <th className="py-2.5 px-4">Location</th>
+                    <th className="py-2.5 px-4">Coordinates</th>
+                    <th className="py-2.5 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredHistory.map((row) => (
+                    <tr key={row._id} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-2.5 px-4">
                         <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
-                            isCi
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            row.type === 'CHECK_IN'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
                           }`}
                         >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              isCi ? 'bg-emerald-500' : 'bg-rose-500'
-                            }`}
-                          ></span>
-                          <span>{isCi ? 'CHECK-IN' : 'CHECK-OUT'}</span>
+                          {row.type}
                         </span>
                       </td>
-
-                      {/* Thumbnail */}
-                      <td className="py-3 px-4">
-                        {item.photo ? (
-                          <div
-                            className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 cursor-pointer group shadow-2xs"
-                            onClick={() => setSelectedPhoto(item.photo)}
-                          >
-                            <img
-                              src={item.photo}
-                              alt="GPS Map Camera"
-                              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
-                            />
-                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
-                              <Eye className="w-4 h-4" />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="w-16 h-16 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400">
-                            <Camera className="w-5 h-5" />
-                          </div>
+                      <td className="py-2.5 px-4">
+                        {row.photo && (
+                          <img
+                            src={row.photo}
+                            alt="Selfie"
+                            className="w-12 h-12 object-cover rounded border border-slate-200 cursor-pointer"
+                            onClick={() => setSelectedPhoto(row.photo)}
+                          />
                         )}
                       </td>
-
-                      {/* Date & Time */}
-                      <td className="py-3 px-4 whitespace-nowrap">
+                      <td className="py-2.5 px-4 whitespace-nowrap">
                         <div className="font-semibold text-slate-900">
-                          {new Date(item.timestamp).toLocaleDateString(undefined, {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
-                          })}
+                          {new Date(row.timestamp).toLocaleDateString()}
                         </div>
-                        <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                          {new Date(item.timestamp).toLocaleTimeString([], {
+                        <div className="text-[11px] text-slate-500">
+                          {new Date(row.timestamp).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit',
                             hour12: true,
-                          })}{' '}
-                          GMT+05:30
+                          })}
                         </div>
                       </td>
-
-                      {/* Purpose */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        {getPurposeBadge(item.purpose)}
+                      <td className="py-2.5 px-4 max-w-xs">
+                        <p className="truncate font-medium text-slate-800">{row.city}</p>
+                        <p className="truncate text-slate-500 text-[11px]">{row.address}</p>
                       </td>
-
-                      {/* Address */}
-                      <td className="py-3 px-4 max-w-xs">
-                        <div className="font-semibold text-slate-900 flex items-center gap-1">
-                          <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span className="truncate">{item.city || 'Local Site'}</span>
-                        </div>
-                        <p
-                          className="text-[11px] text-slate-500 line-clamp-2 mt-0.5"
-                          title={item.address}
+                      <td className="py-2.5 px-4 font-mono text-[11px] text-slate-600">
+                        {row.latitude?.toFixed(4)}°, {row.longitude?.toFixed(4)}°
+                      </td>
+                      <td className="py-2.5 px-4 text-right whitespace-nowrap">
+                        <button
+                          onClick={() => setSelectedPhoto(row.photo)}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium text-[11px] mr-2"
                         >
-                          {item.address}
-                        </p>
-                      </td>
-
-                      {/* Coordinates */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <div className="font-mono text-[11px] text-slate-700">
-                          Lat {item.latitude.toFixed(6)}°
-                        </div>
-                        <div className="font-mono text-[11px] text-slate-700">
-                          Long {item.longitude.toFixed(6)}°
-                        </div>
-                        <span className="text-[10px] text-slate-400">
-                          Accuracy: ±{item.accuracy || 10}m
-                        </span>
-                      </td>
-
-                      {/* Notes */}
-                      <td className="py-3 px-4 max-w-[180px]">
-                        <p
-                          className="text-slate-600 truncate text-[11px]"
-                          title={item.notes || 'No note'}
+                          View Photo
+                        </button>
+                        <a
+                          href={`https://www.google.com/maps?q=${row.latitude},${row.longitude}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 hover:underline text-[11px]"
                         >
-                          {item.notes || <span className="text-slate-400 italic">None</span>}
-                        </p>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => setSelectedPhoto(item.photo)}
-                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-[11px] transition-colors cursor-pointer inline-flex items-center gap-1"
-                            title="View Stamped Photo"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>View Photo</span>
-                          </button>
-                          <a
-                            href={`https://www.google.com/maps?q=${item.latitude},${item.longitude}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors inline-flex items-center"
-                            title="Open in Google Maps"
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </a>
-                        </div>
+                          Maps
+                        </a>
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* GPS Camera Modal */}
+      {/* Camera / Verification Modal */}
       <GPSMapCameraModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        onSuccess={handleSuccess}
-        initialType={modalType}
+        onSuccess={handleModalSuccess}
+        mode={modalMode}
+        initialType={attendanceType}
+        nextStopNumber={dailyRoute.stopsCount + 1}
       />
 
-      {/* Full Photo Inspection Modal */}
+      {/* Photo Preview Modal */}
       {selectedPhoto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative max-w-3xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-700 flex flex-col max-h-[92vh]">
-            <div className="p-4 flex items-center justify-between border-b border-slate-800 text-white">
-              <div className="flex items-center gap-2">
-                <Camera className="w-5 h-5 text-emerald-400" />
-                <h3 className="font-bold text-sm tracking-wide">
-                  GPS Map Camera Certified Photo
-                </h3>
-              </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80">
+          <div className="relative max-w-2xl w-full bg-white rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <span className="font-bold text-slate-800 text-xs">Verified Field Photo</span>
               <button
                 onClick={() => setSelectedPhoto(null)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                className="p-1 text-slate-500 hover:text-slate-800 rounded"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-
-            <div className="flex-1 overflow-auto p-3 flex items-center justify-center bg-black">
+            <div className="p-3 bg-black flex items-center justify-center overflow-auto flex-1">
               <img
                 src={selectedPhoto}
-                alt="Stamped Full Resolution"
-                className="max-h-[75vh] w-auto object-contain rounded-lg shadow-lg"
+                alt="Full resolution"
+                className="max-h-[72vh] w-auto object-contain rounded"
               />
-            </div>
-
-            <div className="p-3 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-              <span>Official Geotagged Watermark Applied</span>
-              <a
-                href={selectedPhoto}
-                download="workforce-attendance-photo.jpg"
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs transition-colors cursor-pointer"
-              >
-                Download Stamped Photo
-              </a>
             </div>
           </div>
         </div>
