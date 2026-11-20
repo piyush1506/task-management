@@ -19,7 +19,10 @@ connectDB();
 
 // Core Middleware
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow local development and local Wi-Fi / LAN network access
+    callback(null, true);
+  },
   credentials: true,
 }));
 app.use(express.json());
@@ -95,9 +98,10 @@ app.use((err, req, res, next) => {
 
 // Start Server
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`[Server] WorkSphere backend listening on http://localhost:${PORT}`);
-    console.log(`[Server] Health check available at http://localhost:${PORT}/api/health`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Server] WorkSphere backend listening on port ${PORT}`);
+    console.log(`[Server] Local:   http://localhost:${PORT}/api/health`);
+    console.log(`[Server] Network: http://192.168.29.50:${PORT}/api/health`);
   });
 }
 
