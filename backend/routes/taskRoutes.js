@@ -6,6 +6,7 @@ const {
   getTaskById,
   updateTask,
   updateTaskStatus,
+  updateTaskDeadline,
   deleteTask,
   addTaskComment,
   addSubtask,
@@ -24,6 +25,7 @@ router.route('/:id')
   .delete(protect, authorize('ADMIN'), deleteTask);
 
 router.patch('/:id/status', protect, updateTaskStatus);
+router.patch('/:id/deadline', protect, updateTaskDeadline);
 router.post('/:id/comments', protect, addTaskComment);
 
 // Subtask management routes

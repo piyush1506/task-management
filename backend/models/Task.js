@@ -25,6 +25,10 @@ const subtaskSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
+    deadline: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

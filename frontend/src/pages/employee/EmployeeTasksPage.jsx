@@ -16,6 +16,7 @@ import {
   Trash2,
   ListTodo,
   Check,
+  Clock,
 } from 'lucide-react';
 
 export default function EmployeeTasksPage() {
@@ -33,6 +34,7 @@ export default function EmployeeTasksPage() {
 
   // Subtask creation state
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [subtaskDeadline, setSubtaskDeadline] = useState('');
   const [subtaskLoading, setSubtaskLoading] = useState(false);
 
   const showToast = (message) => {
@@ -74,6 +76,26 @@ export default function EmployeeTasksPage() {
     }
   };
 
+  // Employee Deadline Selector
+  const handleDeadlineChange = async (taskId, newDeadline) => {
+    if (!newDeadline) return;
+    try {
+      const res = await api.patch(`/tasks/${taskId}/deadline`, { deadline: newDeadline });
+      if (res.data?.success) {
+        showToast(`Deadline set to ${new Date(newDeadline).toLocaleDateString()}`);
+        fetchTasks();
+        if (selectedTask && selectedTask._id === taskId) {
+          setSelectedTask((prev) => ({
+            ...prev,
+            deadline: res.data.deadline,
+          }));
+        }
+      }
+    } catch (err) {
+      alert('Deadline update error: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
   const openDetails = async (task) => {
     try {
       const res = await api.get(`/tasks/${task._id}`);
@@ -95,9 +117,11 @@ export default function EmployeeTasksPage() {
     try {
       const res = await api.post(`/tasks/${selectedTask._id}/subtasks`, {
         title: newSubtaskTitle.trim(),
+        deadline: subtaskDeadline || null,
       });
       if (res.data?.success) {
         setNewSubtaskTitle('');
+        setSubtaskDeadline('');
         setSelectedTask((prev) => ({
           ...prev,
           subtasks: res.data.subtasks,
@@ -202,7 +226,7 @@ export default function EmployeeTasksPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">My Assigned Tasks</h1>
         <p className="text-xs text-slate-500 mt-1">
-          Track deliverables, manage step-by-step subtasks, and check off completed work.
+          Select task target deadlines, break down deliverables into subtasks, and track completion.
         </p>
       </div>
 
@@ -256,7 +280,7 @@ export default function EmployeeTasksPage() {
                 <th className="py-3.5 px-4 text-center">Subtasks Progress</th>
                 <th className="py-3.5 px-4 text-center">Priority</th>
                 <th className="py-3.5 px-4 text-center">Status</th>
-                <th className="py-3.5 px-4">Deadline</th>
+                <th className="py-3.5 px-4">Select Deadline</th>
                 <th className="py-3.5 px-4 text-right">Action</th>
               </tr>
             </thead>
@@ -279,6 +303,9 @@ export default function EmployeeTasksPage() {
                   const sTotal = sList.length;
                   const sDone = sList.filter((s) => s.isCompleted).length;
                   const sPercent = sTotal > 0 ? Math.round((sDone / sTotal) * 100) : 0;
+                  const deadlineStr = t.deadline
+                    ? new Date(t.deadline).toISOString().split('T')[0]
+                    : '';
 
                   return (
                     <tr key={t._id} className="hover:bg-slate-50/60">
@@ -344,8 +371,23 @@ export default function EmployeeTasksPage() {
                         </select>
                       </td>
 
-                      <td className="py-3.5 px-4 text-slate-600 whitespace-nowrap">
-                        {new Date(t.deadline).toLocaleDateString()}
+                      {/* Deadline Selector by Employee */}
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <input
+                            type="date"
+                            value={deadlineStr}
+                            onChange={(e) => handleDeadlineChange(t._id, e.target.value)}
+                            className="px-2 py-0.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded text-slate-800 font-semibold text-[11px] focus:outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                            title="Select / update task deadline"
+                          />
+                        </div>
+                        {t.isOverdue && (
+                          <span className="text-[10px] text-rose-600 font-bold block mt-0.5 ml-5">
+                            Overdue
+                          </span>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4 text-right">
@@ -375,19 +417,39 @@ export default function EmployeeTasksPage() {
       >
         {selectedTask && (
           <div className="space-y-6 text-xs">
-            {/* Task Overview Card */}
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+            {/* Task Overview Card with Editable Deadline */}
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
               <div className="flex items-center justify-between">
                 <StatusBadge status={selectedTask.status} />
                 <PriorityBadge priority={selectedTask.priority} />
               </div>
+
               <p className="text-slate-800 font-medium leading-relaxed">
                 {selectedTask.description}
               </p>
-              <p className="text-[11px] text-slate-500 pt-1">
-                Project: <strong className="text-slate-700">{selectedTask.project?.title}</strong>{' '}
-                • Due: {new Date(selectedTask.deadline).toLocaleDateString()}
-              </p>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200 text-[11px]">
+                <span className="text-slate-600">
+                  Project:{' '}
+                  <strong className="text-slate-800">{selectedTask.project?.title}</strong>
+                </span>
+
+                {/* Deadline selection inside modal */}
+                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
+                  <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                  <span className="font-semibold text-slate-700">Target Deadline:</span>
+                  <input
+                    type="date"
+                    value={
+                      selectedTask.deadline
+                        ? new Date(selectedTask.deadline).toISOString().split('T')[0]
+                        : ''
+                    }
+                    onChange={(e) => handleDeadlineChange(selectedTask._id, e.target.value)}
+                    className="px-2 py-0.5 bg-slate-50 border border-slate-300 rounded text-slate-800 font-bold text-[11px] focus:outline-none focus:border-blue-600 cursor-pointer"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* SUBTASKS & CHECKLIST SECTION */}
@@ -440,14 +502,21 @@ export default function EmployeeTasksPage() {
                 </div>
               )}
 
-              {/* Add Subtask Form */}
-              <form onSubmit={handleAddSubtask} className="flex gap-2 pt-1">
+              {/* Add Subtask Form with Target Date */}
+              <form onSubmit={handleAddSubtask} className="flex flex-wrap gap-2 pt-1">
                 <input
                   type="text"
-                  placeholder="Type a subtask (e.g. Design mobile layout, get client signoff)..."
+                  placeholder="Type a subtask (e.g. Design layout, get client signoff)..."
                   value={newSubtaskTitle}
                   onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-xs focus:outline-none focus:border-blue-600"
+                  className="flex-1 min-w-[200px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-xs focus:outline-none focus:border-blue-600"
+                />
+                <input
+                  type="date"
+                  value={subtaskDeadline}
+                  onChange={(e) => setSubtaskDeadline(e.target.value)}
+                  className="px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-xs focus:outline-none focus:border-blue-600 cursor-pointer"
+                  title="Subtask target deadline (optional)"
                 />
                 <button
                   type="submit"
@@ -486,15 +555,27 @@ export default function EmployeeTasksPage() {
                           {st.isCompleted && <Check className="w-3 h-3 stroke-[3]" />}
                         </div>
 
-                        <span
-                          className={`text-xs transition-colors ${
-                            st.isCompleted
-                              ? 'line-through text-slate-400 font-normal'
-                              : 'text-slate-800 font-semibold'
-                          }`}
-                        >
-                          {st.title}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`text-xs transition-colors ${
+                              st.isCompleted
+                                ? 'line-through text-slate-400 font-normal'
+                                : 'text-slate-800 font-semibold'
+                            }`}
+                          >
+                            {st.title}
+                          </span>
+
+                          {st.deadline && (
+                            <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 font-medium">
+                              Due:{' '}
+                              {new Date(st.deadline).toLocaleDateString(undefined, {
+                                day: '2-digit',
+                                month: 'short',
+                              })}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Delete icon */}

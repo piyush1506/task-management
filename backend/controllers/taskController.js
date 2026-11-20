@@ -446,12 +446,94 @@ const addTaskComment = async (req, res, next) => {
   }
 };
 
+// @desc    Update task deadline (Employee assigned or Admin)
+// @route   PATCH /api/tasks/:id/deadline
+// @access  Private
+const updateTaskDeadline = async (req, res, next) => {
+  try {
+    const { deadline } = req.body;
+
+    if (!deadline) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deadline date is required',
+      });
+    }
+
+    const task = await Task.findById(req.params.id).populate('project', 'title');
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found',
+      });
+    }
+
+    // Permission check: Assigned employee or Admin
+    const isAssignee = task.assignedTo?.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (!isAssignee && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Only the assigned employee or an admin can update the deadline',
+      });
+    }
+
+    const parsedDeadline = new Date(deadline);
+    if (isNaN(parsedDeadline.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid deadline date format',
+      });
+    }
+
+    const oldDeadline = task.deadline;
+    task.deadline = parsedDeadline;
+    await task.save();
+
+    await ActivityLog.create({
+      user: req.user._id,
+      action: 'TASK_DEADLINE_UPDATED',
+      entityType: 'TASK',
+      entityId: task._id,
+      description: `${req.user.name} adjusted deadline for "${task.title}" to ${parsedDeadline.toLocaleDateString()}`,
+    });
+
+    // If an employee updated the deadline, notify admins
+    if (isAssignee && !isAdmin) {
+      try {
+        const admins = await User.find({ role: 'ADMIN' });
+        for (const adminUser of admins) {
+          await Notification.create({
+            user: adminUser._id,
+            title: 'Task Deadline Adjusted',
+            message: `${req.user.name} updated the deadline for task "${task.title}" to ${parsedDeadline.toLocaleDateString()}.`,
+            relatedEntityType: 'TASK',
+            relatedEntityId: task._id,
+          });
+        }
+      } catch (notifErr) {
+        console.warn('Notification error:', notifErr.message);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Task deadline updated successfully',
+      deadline: task.deadline,
+      task,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // @desc    Add a subtask to a task (Employee assigned or Admin)
 // @route   POST /api/tasks/:id/subtasks
 // @access  Private
 const addSubtask = async (req, res, next) => {
   try {
-    const { title } = req.body;
+    const { title, deadline } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({
@@ -481,6 +563,7 @@ const addSubtask = async (req, res, next) => {
 
     const newSubtask = {
       title: title.trim(),
+      deadline: deadline ? new Date(deadline) : null,
       isCompleted: false,
       createdBy: req.user._id,
       createdAt: new Date(),
@@ -520,7 +603,7 @@ const addSubtask = async (req, res, next) => {
 const toggleSubtask = async (req, res, next) => {
   try {
     const { id, subtaskId } = req.params;
-    const { isCompleted } = req.body;
+    const { isCompleted, deadline } = req.body;
 
     const task = await Task.findById(id);
     if (!task) {
@@ -549,10 +632,21 @@ const toggleSubtask = async (req, res, next) => {
       });
     }
 
-    const nextState = typeof isCompleted === 'boolean' ? isCompleted : !subtask.isCompleted;
-    subtask.isCompleted = nextState;
-    subtask.completedAt = nextState ? new Date() : null;
-    subtask.completedBy = nextState ? req.user._id : null;
+    if (deadline !== undefined) {
+      subtask.deadline = deadline ? new Date(deadline) : null;
+    }
+
+    if (isCompleted !== undefined) {
+      const nextState = isCompleted;
+      subtask.isCompleted = nextState;
+      subtask.completedAt = nextState ? new Date() : null;
+      subtask.completedBy = nextState ? req.user._id : null;
+    } else if (req.body.toggle) {
+      const nextState = !subtask.isCompleted;
+      subtask.isCompleted = nextState;
+      subtask.completedAt = nextState ? new Date() : null;
+      subtask.completedBy = nextState ? req.user._id : null;
+    }
 
     const totalCount = task.subtasks.length;
     const completedCount = task.subtasks.filter((s) => s.isCompleted).length;
@@ -575,14 +669,12 @@ const toggleSubtask = async (req, res, next) => {
       action: 'SUBTASK_UPDATED',
       entityType: 'TASK',
       entityId: task._id,
-      description: `${req.user.name} marked subtask "${subtask.title}" as ${
-        nextState ? 'COMPLETED' : 'INCOMPLETE'
-      }`,
+      description: `${req.user.name} updated subtask "${subtask.title}"`,
     });
 
     res.status(200).json({
       success: true,
-      message: `Subtask marked as ${nextState ? 'completed' : 'incomplete'}`,
+      message: 'Subtask updated',
       subtask,
       subtasks: task.subtasks,
       summary: {
@@ -644,6 +736,7 @@ module.exports = {
   getTaskById,
   updateTask,
   updateTaskStatus,
+  updateTaskDeadline,
   deleteTask,
   addTaskComment,
   addSubtask,
